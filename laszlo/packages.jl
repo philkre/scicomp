@@ -3,7 +3,10 @@ using Pkg
 dependencies = [
     "IJulia",
     "Plots",
-    "MPI"
-]
+    "MPI",
+    "SharedArrays",
+    "LoopVectorization",
+    "BenchmarkTools",
+    "FFMPEG"]
 
 Pkg.add(dependencies)
