@@ -1,6 +1,7 @@
 # two-d time dependent diffusion equation
 using HDF5
 using Plots
+using Statistics
 using ProgressMeter
 
 function diffusion2d!(c, D, dx, dt)
@@ -164,10 +165,58 @@ function plot_animation(filepath="output.h5"; fps=30, filename="diffusion_anim.m
                 aspect_ratio=1,
                 color=:viridis,
                 clims=(0, 1),
+                xlims=(x[1], x[end]),
+                ylims=(y[1], y[end]),
             )
         end
 
         mp4(anim, filename, fps=fps)
+    end
+end
+
+function plot_profiles(filepath="output.h5", output="profiles.png"; times=nothing, x_index=nothing, average_x=true)
+    """
+    Plots concentration as a function of y for selected time points.
+    If a time dataset exists, `times` can be given in physical time units and
+    the nearest stored times will be used. Otherwise, `times` is interpreted
+    as frame indices (1-based). Defaults to all frames if none provided.
+    """
+    h5open(filepath, "r") do f
+        c = read(f["c"])
+        dy = read(attributes(f)["dy"])
+        y = (0:size(c, 2)-1) .* dy
+
+        has_time = haskey(f, "time")
+        tvals = has_time ? read(f["time"]) : nothing
+
+        # normalize to 3D for unified handling
+        c3 = ndims(c) == 2 ? reshape(c, size(c, 1), size(c, 2), 1) : c
+        nt = size(c3, 3)
+
+        if times === nothing
+            indices = 1:nt
+        else
+            if has_time
+                indices = [findmin(abs.(tvals .- t))[2] for t in times]
+            else
+                indices = Int.(times)
+            end
+        end
+
+        p = plot()
+        for idx in indices
+            slice = c3[:, :, idx]
+            prof = average_x ? vec(mean(slice, dims=1)) :
+                   slice[isnothing(x_index) ? 1 : x_index, :]
+            label = has_time ? "t=$(tvals[idx])" : "frame=$idx"
+            plot!(p, y, prof, label=label)
+        end
+
+        xlabel!(p, "y")
+        ylabel!(p, "concentration")
+        title!(p, "Concentration vs y")
+        display(p)
+        savefig(output)
     end
 end
 
@@ -177,12 +226,14 @@ function main()
     N = 100
     dy = 0.01
     dx = 0.01
-    dt = 0.0001
-    steps = 100000
-    write_interval = 100
+    dt = 0.000001
+    T = 1
+    steps = Int(T / dt)
+    write_interval = Int(steps / 10)
 
-    run(D, N, dy, dx, dt, steps, write_interval; timing=true, progress=true)
-    plot_animation("output.h5"; fps=30, filename="diffusion_anim.mp4")
+    # run(D, N, dy, dx, dt, steps, write_interval; timing=true, progress=true)
+    # plot_animation("output.h5"; fps=30, filename="diffusion_anim.mp4")
+    plot_profiles("output.h5"; times=[0.001, 0.01, 0.1, 1.0], average_x=true)
 end
 
 main()
