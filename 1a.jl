@@ -65,7 +65,7 @@ function leapfrog_step!(Psi, a, v, c, dx, dt)
 
 end
 
-function run(Psi, c, dx, dt, n_steps; method="euler")
+function run(Psi, c, dx, dt, n_steps; method="euler", timing=false)
     """Runs the wave simulation for a given initial condition Psi and parameters. 
     Returns an array of Psi at each time step.
     """
@@ -78,14 +78,21 @@ function run(Psi, c, dx, dt, n_steps; method="euler")
     # array that holds the solution at each time step (for plotting)
     psis = zeros(N, n_steps)
 
-    @inbounds for n in 1:n_steps
-        if method == "euler"
-            euler_step!(Psi, a, v, c, dx, dt)
-        elseif method == "leapfrog"
-            leapfrog_step!(Psi, a, v, c, dx, dt)
+    elapsed = @elapsed begin
+        @inbounds for n in 1:n_steps
+            if method == "euler"
+                euler_step!(Psi, a, v, c, dx, dt)
+            elseif method == "leapfrog"
+                leapfrog_step!(Psi, a, v, c, dx, dt)
+            end
+            psis[:, n] = Psi
         end
-        psis[:, n] = Psi
     end
+
+    if timing
+        println("run($method) completed in $(round(elapsed; digits=6)) s")
+    end
+
     return psis
 end
 
