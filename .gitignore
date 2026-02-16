@@ -30,4 +30,4 @@ JuliaLocalPreferences.toml
 
 # Local files 
 Scientific_Computing_Assignments.pdf
-tmp/
+tmp*/
