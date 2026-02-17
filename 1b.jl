@@ -3,8 +3,11 @@ using HDF5
 using Plots
 using Statistics
 using ProgressMeter
+using SpecialFunctions
+using Printf
+using LinearAlgebra
 
-function diffusion2d!(c, D, dx, dt)
+function diffusion2d!(c::Array{Float64,2}, D::Float64, dx::Float64, dt::Float64)
     """
     Discretisation of the 2D diffusion equation: dC / dt = D * (d^2 C / dx^2 + d^2 C / dy^2)
     shape: c[x,y] -> c[i,j]
@@ -36,7 +39,7 @@ function diffusion2d!(c, D, dx, dt)
     c[1, :] .= c[end, :]
 end
 
-function write_out(c, filepath, step, dx, dy; t=nothing)
+function write_out(c::Array{Float64,2}, filepath::String, step::Int64, dx::Float64, dy::Float64; t=nothing)
     """
     Writes the data in c to a HDF5 file at the specified filepath. 
     """
@@ -96,7 +99,7 @@ function write_out(c, filepath, step, dx, dy; t=nothing)
     return nothing
 end
 
-function run(D, N, dy, dx, dt, steps, write_interval; timing=false, progress=false, filepath="output.h5")
+function run(D::Float64, N::Int64, dy::Float64, dx::Float64, dt::Float64, steps::Int64, write_interval::Int64; timing::Bool=false, progress::Bool=false, filepath::String="output.h5")
     """
     Runs the diffusion simulation for a given set of parameters.
     - D: diffusion coefficient 
@@ -107,6 +110,11 @@ function run(D, N, dy, dx, dt, steps, write_interval; timing=false, progress=fal
     - steps: total number of time steps to simulate 
     - write_interval: interval at which to write output (e.g., every 10 steps)
     """
+
+    # check stability
+    stab = 4 * dt * D / (dx * dx)
+    @assert stab <= 1 "Stability condition violated: 4*D*dt/dx^2 must be <= 1, is $stab"
+
     c = zeros(N, N)
     # init boundaries
     c[:, 1] .= 0
@@ -137,7 +145,7 @@ function run(D, N, dy, dx, dt, steps, write_interval; timing=false, progress=fal
     end
 end
 
-function plot_animation(filepath="output.h5"; fps=30, filename="diffusion_anim.mp4", max_frames=300, stride=nothing)
+function plot_animation(filepath::String="output.h5"; fps::Int64=30, filename::String="diffusion_anim.mp4", max_frames::Int64=300, stride::Int64=nothing)
     """
     Loads diffusion data from an HDF5 file and creates an animated heatmap over time.
     """
@@ -174,7 +182,32 @@ function plot_animation(filepath="output.h5"; fps=30, filename="diffusion_anim.m
     end
 end
 
-function plot_profiles(filepath="output.h5", output="profiles.png"; times=nothing, x_index=nothing, average_x=true)
+function analytical_profile_series(x::AbstractVector{<:Real}, t::Real, D::Real, L::Real; n_terms::Integer=200)
+    """Truncated image-series solution:
+    c(x,t) = sum_{i=0}^∞ [erfc((L - x + 2iL)/(2*sqrt(Dt))) - erfc((L + x + 2iL)/(2*sqrt(Dt)))]"""
+
+    # ensure t > 0
+    if t <= 0
+        throw(ArgumentError("t must be > 0 for analytical_profile_series"))
+    end
+    # precompute denominator
+    denom = 2 * sqrt(D * t)
+    c = zeros(Float64, length(x))
+
+    # sum series terms
+    for i in 0:n_terms
+        c .+= erfc.((L .- x .+ 2i * L) ./ denom) .- erfc.((L .+ x .+ 2i * L) ./ denom)
+    end
+
+    return c
+end
+
+function plot_profiles(filepath::String="output.h5", output::String="profiles.png";
+    times::Vector{Float64}=Float64[],
+    x_index::Int64=0,
+    average_x::Bool=true,
+    D::Float64=1.0,
+    n_terms::Int64=200)
     """
     Plots concentration as a function of y for selected time points.
     If a time dataset exists, `times` can be given in physical time units and
@@ -182,10 +215,13 @@ function plot_profiles(filepath="output.h5", output="profiles.png"; times=nothin
     as frame indices (1-based). Defaults to all frames if none provided.
     """
     h5open(filepath, "r") do f
+        # read data
         c = read(f["c"])
         dy = read(attributes(f)["dy"])
         y = (0:size(c, 2)-1) .* dy
+        L = y[end]
 
+        # get times if available
         has_time = haskey(f, "time")
         tvals = has_time ? read(f["time"]) : nothing
 
@@ -193,7 +229,8 @@ function plot_profiles(filepath="output.h5", output="profiles.png"; times=nothin
         c3 = ndims(c) == 2 ? reshape(c, size(c, 1), size(c, 2), 1) : c
         nt = size(c3, 3)
 
-        if times === nothing
+        # determine indices to plot
+        if isempty(times)
             indices = 1:nt
         else
             if has_time
@@ -203,13 +240,44 @@ function plot_profiles(filepath="output.h5", output="profiles.png"; times=nothin
             end
         end
 
-        p = plot()
-        for idx in indices
+        # plot profile for each selectd point in time
+        p = plot(dpi=300)
+        for (k, idx) in enumerate(indices)
+
+            # slice
             slice = c3[:, :, idx]
+
+            # get profile (average over x or slice at x_index)
             prof = average_x ? vec(mean(slice, dims=1)) :
                    slice[isnothing(x_index) ? 1 : x_index, :]
             label = has_time ? "t=$(tvals[idx])" : "frame=$idx"
-            plot!(p, y, prof, label=label)
+            plot!(p, y, prof, label=label, seriescolor=k)
+
+            # add analytical solution if time data is available and t > 0
+            if has_time
+                t = tvals[idx]
+                if t > 0
+                    c_analytical = analytical_profile_series(y, t, D, L; n_terms=n_terms)
+                    plot!(p, y, c_analytical, linestyle=:dash, label="analytical t=$(round(t; digits=4))", seriescolor=k)
+                end
+            end
+        end
+
+        # print error between numerical and analytical at final time if possible
+        if has_time && !isempty(times)
+            # last idx
+            final_idx = indices[end]
+            final_t = tvals[final_idx]
+
+            if final_t > 0
+                # compute numerical and analytical profiles at final time
+                numerical_final = average_x ? vec(mean(c3[:, :, final_idx], dims=1)) : c3[isnothing(x_index) ? 1 : x_index, :, final_idx]
+                analytical_final = analytical_profile_series(y, final_t, D, L; n_terms=n_terms)
+
+                # caculate and print relative L2 error
+                error = norm(numerical_final - analytical_final) / norm(analytical_final)
+                println("Relative L2 error at final time (t=$(final_t)): $(round(error; sigdigits=3))")
+            end
         end
 
         xlabel!(p, "y")
@@ -220,20 +288,61 @@ function plot_profiles(filepath="output.h5", output="profiles.png"; times=nothin
     end
 end
 
+function plot_2d_concentration(
+    filepath::String="output.h5",
+    output::String="concentration.png",
+    timesteps::Vector{Float64}=[1.0])
+    """
+    Plots a 2D heatmap of concentration at defined timesteps
+    """
+
+    h5open(filepath, "r") do f
+        # read data
+        c = read(f["c"])
+        dx = read(attributes(f)["dx"])
+        dy = read(attributes(f)["dy"])
+        x = (0:size(c, 1)-1) .* dx
+        y = (0:size(c, 2)-1) .* dy
+
+        # timesteps to indices
+        tvals = read(f["time"])
+        timesteps_idx = [findmin(abs.(tvals .- t))[2] for t in timesteps]
+
+        subplots = []
+        for (i, time_index) in enumerate(timesteps_idx)
+            # slice timestep
+            slice = c[:, :, time_index]
+            # get time for title
+            time = timesteps[i]
+            # plot
+            p = heatmap(x, y, slice', xlabel="x", ylabel="y", title="Concentration at time $time", aspect_ratio=1, color=:viridis)
+            push!(subplots, p)
+        end
+        # subplots
+        plot(subplots..., layout=(ceil(Int64, length(subplots) / 2), 2), size=(1800, 1200), dpi=300)
+        savefig(output)
+    end
+end
+
 
 function main()
-    D = 0.1
+    D = 1.0
+    Lx = 1.0
+    Ly = 1.0
     N = 100
-    dy = 0.01
-    dx = 0.01
-    dt = 0.000001
+    dy = Ly / (N - 1)
+    dx = Lx / (N - 1)
+    dt = 0.00001
     T = 1
-    steps = Int(T / dt)
-    write_interval = Int(steps / 10)
+    steps = ceil(Int, T / dt)
+    write_interval = 1
 
-    # run(D, N, dy, dx, dt, steps, write_interval; timing=true, progress=true)
-    # plot_animation("output.h5"; fps=30, filename="diffusion_anim.mp4")
-    plot_profiles("output.h5"; times=[0.001, 0.01, 0.1, 1.0], average_x=true)
+    print("Discretisation: dx=$(@sprintf("%.3f", dx)), dy=$(@sprintf("%.3f", dy)), dt=$dt, steps=$steps\n")
+
+    #run(D, N, dy, dx, dt, steps, write_interval; timing=true, progress=true)
+    #plot_animation("output.h5"; fps=30, filename="diffusion_anim.mp4")
+    #plot_profiles("output.h5", "profiles.png"; times=[0.001, 0.01, 0.1, 1.0], average_x=true, D=D)
+    #plot_2d_concentration("output.h5", "concentration.png", [0.0, 0.001, 0.01, 0.1, 1.0])
 end
 
 main()
