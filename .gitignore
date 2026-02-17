@@ -37,6 +37,8 @@ JuliaLocalPreferences.toml
 *.h5
 *.png
 *.mp4
+*.jld
+*.jld2
 
 # Local files 
 Scientific_Computing_Assignments.pdf

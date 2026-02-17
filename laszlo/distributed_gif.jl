@@ -4,14 +4,10 @@ using Distributed
     ENV["GKSwstype"] = "nul"  # Headless mode - no display
 end
 using FFMPEG
-function distributed_gif(t_f::Float64, t_0::Float64, dt::Float64, L::Float64, N::Int, plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String; fps::Int64=30, do_palette=false, width=600)
+function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String; fps::Int64=30, do_palette=false, width=600)
     # Create a temporary directory to store frames
     tmp_dirname = "tmp_gif" * string(rand(1:10000))  # Generate a unique temporary directory name
     mkdir(tmp_dirname)
-
-    # Animate the solution and save frames
-    i_total = Int((t_f - t_0) / dt)
-    x = range(0, L, length=N)
 
     i = 0
     @sync @distributed for p in plots

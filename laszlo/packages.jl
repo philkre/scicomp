@@ -7,6 +7,9 @@ dependencies = [
     "SharedArrays",
     "LoopVectorization",
     "BenchmarkTools",
-    "FFMPEG"]
+    "FFMPEG",
+    "JLD2",
+    "SpecialFunctions"
+]
 
 Pkg.add(dependencies)
