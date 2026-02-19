@@ -6,6 +6,20 @@ end
 using FFMPEG
 
 
+"""
+    gif_slow(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String; fps::Int64=30)
+
+Create an animated GIF from a vector of plots using Plots.jl's built-in animation.
+
+# Arguments
+- `plots::Vector{Plots.Plot{Plots.GRBackend}}`: Vector of plot objects to animate
+- `gifname::String`: Output filename for the GIF
+- `fps::Int64`: Frames per second (default: 30)
+
+# Notes
+This is a simple but slower method compared to `distributed_gif`. 
+Uses Plots.jl's Animation framework.
+"""
 function gif_slow(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String; fps::Int64=30)
     # Animate the solution and save frames
     default(legend=false)
@@ -18,6 +32,25 @@ function gif_slow(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String; f
 end
 
 
+"""
+    distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String; fps::Int64=30, do_palette=false, width=600)
+
+Create an animated GIF from a vector of plots using distributed computing and FFMPEG.
+
+# Arguments
+- `plots::Vector{Plots.Plot{Plots.GRBackend}}`: Vector of plot objects to animate
+- `gifname::String`: Output filename for the GIF
+- `fps::Int64`: Frames per second (default: 30)
+- `do_palette::Bool`: Whether to generate and use a custom color palette for better quality (default: false)
+- `width::Int`: Width of the output GIF in pixels (default: 600)
+
+# Notes
+- Uses distributed computing to save frames in parallel
+- Leverages FFMPEG for efficient GIF encoding with hardware acceleration
+- Automatically creates and cleans up temporary frame directory
+- With `do_palette=true`, generates an optimized palette for better color reproduction
+- Uses videotoolbox hardware acceleration on macOS when available
+"""
 function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String; fps::Int64=30, do_palette=false, width=600)
     # Create a temporary directory to store frames
     tmp_dirname = "tmp_gif" * string(rand(1:10000))  # Generate a unique temporary directory name

@@ -3,6 +3,25 @@ using Distributed
 using SpecialFunctions
 
 
+"""
+    c_next(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)
+
+Compute the next time step for the diffusion equation using explicit finite differences.
+
+# Arguments
+- `c::Matrix{Float64}`: Current concentration field
+- `D::Float64`: Diffusion coefficient
+- `dx::Float64`: Spatial step size
+- `dt::Float64`: Time step size
+
+# Returns
+- `Matrix{Float64}`: Updated concentration field
+
+# Boundary Conditions
+- Bottom boundary (y=0): c = 0.0
+- Top boundary (y=1): c = 1.0
+- x-direction: Periodic
+"""
 function c_next(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)
     N = size(c, 1)
     c_new = similar(c)
@@ -27,6 +46,23 @@ function c_next(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)
 end
 
 
+"""
+    c_next_single_loop(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)
+
+Compute the next time step using a single vectorized loop with periodic boundary conditions.
+
+# Arguments
+- `c::Matrix{Float64}`: Current concentration field
+- `D::Float64`: Diffusion coefficient
+- `dx::Float64`: Spatial step size
+- `dt::Float64`: Time step size
+
+# Returns
+- `Matrix{Float64}`: Updated concentration field
+
+# Notes
+Uses a single loop with explicit boundary wrapping for improved performance.
+"""
 function c_next_single_loop(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)
     N = size(c, 1)
     c_new = zeros(N, N)
@@ -47,6 +83,23 @@ function c_next_single_loop(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Flo
 end
 
 
+"""
+    c_next_dist_turbo(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)
+
+Compute the next time step using distributed computing with turbo optimization.
+
+# Arguments
+- `c::Matrix{Float64}`: Current concentration field
+- `D::Float64`: Diffusion coefficient
+- `dx::Float64`: Spatial step size
+- `dt::Float64`: Time step size
+
+# Returns
+- `Matrix{Float64}`: Updated concentration field
+
+# Notes
+Combines `@distributed` and `@turbo` for parallel computation.
+"""
 function c_next_dist_turbo(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)
     N = size(c, 1)
     c_new = similar(c)
@@ -72,6 +125,23 @@ function c_next_dist_turbo(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Floa
 end
 
 
+"""
+    c_next_dist(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)
+
+Compute the next time step using distributed computing with flattened indexing.
+
+# Arguments
+- `c::Matrix{Float64}`: Current concentration field
+- `D::Float64`: Diffusion coefficient
+- `dx::Float64`: Spatial step size
+- `dt::Float64`: Time step size
+
+# Returns
+- `Matrix{Float64}`: Updated concentration field
+
+# Notes
+Distributes work by flattening the 2D grid into a 1D range for parallel processing.
+"""
 function c_next_dist(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)
     N = size(c, 1)
     c_new = similar(c)
@@ -97,6 +167,20 @@ function c_next_dist(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)
 end
 
 
+"""
+    c_next_jacobi(c::Matrix{Float64})
+
+Compute the next iteration using the Jacobi method for steady-state diffusion.
+
+# Arguments
+- `c::Matrix{Float64}`: Current concentration field
+
+# Returns
+- `Matrix{Float64}`: Updated concentration field
+
+# Notes
+Uses Fourier number Fo = 0.25 for optimal convergence.
+"""
 function c_next_jacobi(c::Matrix{Float64})
     N = size(c, 1)
     c_new = similar(c)
@@ -121,6 +205,20 @@ function c_next_jacobi(c::Matrix{Float64})
 end
 
 
+"""
+    c_next_gauss_seidel!(c::AbstractMatrix{Float64})
+
+Compute the next iteration using the Gauss-Seidel method (in-place).
+
+# Arguments
+- `c::AbstractMatrix{Float64}`: Concentration field (modified in-place)
+
+# Returns
+- `AbstractMatrix{Float64}`: Reference to the updated concentration field
+
+# Notes
+Updates the matrix in-place using the most recently computed values.
+"""
 function c_next_gauss_seidel!(c::AbstractMatrix{Float64})
     N = size(c, 1)
     Fo = 0.25
@@ -137,6 +235,21 @@ function c_next_gauss_seidel!(c::AbstractMatrix{Float64})
 end
 
 
+"""
+    c_next_SOR!(c::AbstractMatrix{Float64}, omega::Float64=1.85)
+
+Compute the next iteration using the Successive Over-Relaxation (SOR) method.
+
+# Arguments
+- `c::AbstractMatrix{Float64}`: Concentration field (modified in-place)
+- `omega::Float64`: Relaxation parameter (default: 1.85)
+
+# Returns
+- `AbstractMatrix{Float64}`: Reference to the updated concentration field
+
+# Notes
+Omega values: ω = 1 gives Gauss-Seidel, ω > 1 gives over-relaxation, ω < 1 gives under-relaxation.
+"""
 function c_next_SOR!(c::AbstractMatrix{Float64}, omega::Float64=1.85)
     N = size(c, 1)
     Fo = 0.25 * omega
@@ -159,6 +272,26 @@ function c_next_SOR!(c::AbstractMatrix{Float64}, omega::Float64=1.85)
 end
 
 
+"""
+    propagate_c_diffusion(c::Matrix, L::Float64, N::Int, D::Float64, t_0::Float64, t_f::Float64, dt::Float64)
+
+Propagate the diffusion equation from initial time to final time.
+
+# Arguments
+- `c::Matrix`: Initial concentration field
+- `L::Float64`: Domain length
+- `N::Int`: Number of grid points
+- `D::Float64`: Diffusion coefficient
+- `t_0::Float64`: Initial time
+- `t_f::Float64`: Final time
+- `dt::Float64`: Time step size
+
+# Returns
+- `Matrix`: Concentration field at final time
+
+# Throws
+- `ErrorException`: If stability condition D*dt/dx² > 0.25 is violated
+"""
 function propagate_c_diffusion(c::Matrix, L::Float64, N::Int, D::Float64, t_0::Float64, t_f::Float64, dt::Float64)
     c_curr = copy(c)
     dx = L / N
@@ -176,7 +309,25 @@ function propagate_c_diffusion(c::Matrix, L::Float64, N::Int, D::Float64, t_0::F
 end
 
 
-"Analytical solution for the diffusion equation with c(y=0)=0 and c(y=1)=1."
+"""
+    c_anal(x::Float64, t::Float64, D::Float64; i_max::Int=100)
+using JLD2
+
+Analytical solution for the diffusion equation with boundary conditions c(y=0)=0 and c(y=1)=1.
+
+# Arguments
+- `x::Float64`: Position (0 ≤ x ≤ 1)
+- `t::Float64`: Time
+- `D::Float64`: Diffusion coefficient
+- `i_max::Int`: Maximum number of terms in the series expansion (default: 100)
+
+# Returns
+- `Float64`: Analytical concentration value at position x and time t
+
+# Notes
+Uses a series expansion with complementary error functions. For large `i_max` (> 50,000),
+distributes the computation across available workers.
+"""
 function c_anal(x::Float64, t::Float64, D::Float64; i_max::Int=100)
     denom = 2 * sqrt(D * t)
 
@@ -194,16 +345,57 @@ function c_anal(x::Float64, t::Float64, D::Float64; i_max::Int=100)
 end
 
 
+"""
+    delta(c_old::Matrix{Float64}, c_new::Matrix{Float64})
+
+Compute the maximum absolute difference between two concentration fields.
+
+# Arguments
+- `c_old::Matrix{Float64}`: Previous concentration field
+- `c_new::Matrix{Float64}`: New concentration field
+
+# Returns
+- `Float64`: Maximum absolute difference (L∞ norm)
+"""
 function delta(c_old::Matrix{Float64}, c_new::Matrix{Float64})
     return maximum(abs.(c_new .- c_old))
 end
 
 
+"""
+    stopping_condition(c_old::Matrix{Float64}, c_new::Matrix{Float64}, tol::Float64)
+
+Check if the iterative solver has converged within tolerance.
+
+# Arguments
+- `c_old::Matrix{Float64}`: Previous concentration field
+- `c_new::Matrix{Float64}`: New concentration field
+- `tol::Float64`: Convergence tolerance
+
+# Returns
+- `Bool`: True if converged (maximum difference < tolerance)
+"""
 function stopping_condition(c_old::Matrix{Float64}, c_new::Matrix{Float64}, tol::Float64)
     return delta(c_old, c_new) < tol
 end
 
 
+"""
+    solve_until_tol(solver::Function, c_initial::Matrix{Float64}, tol::Float64, max_iters::Int, kwargs...; quiet::Bool=false)
+
+Solve the diffusion equation iteratively until convergence or maximum iterations.
+
+# Arguments
+- `solver::Function`: Solver function to use (e.g., c_next_jacobi, c_next_SOR!)
+- `c_initial::Matrix{Float64}`: Initial concentration field
+- `tol::Float64`: Convergence tolerance
+- `max_iters::Int`: Maximum number of iterations
+- `kwargs...`: Additional arguments to pass to the solver
+- `quiet::Bool`: If true, suppress convergence messages (default: false)
+
+# Returns
+- `Tuple{Matrix{Float64}, Vector{Float64}}`: Final concentration field and convergence history
+"""
 function solve_until_tol(solver::Function, c_initial::Matrix{Float64}, tol::Float64, max_iters::Int, kwargs...; quiet::Bool=false)
     c_old = copy(c_initial)
     c_new = copy(c_initial)
@@ -227,6 +419,21 @@ function solve_until_tol(solver::Function, c_initial::Matrix{Float64}, tol::Floa
 end
 
 
+"""
+    get_iteration_count_SOR(c_0::Matrix{Float64}, omega::Float64, tol::Float64; i_max=20000, check_interval::Int64=1)
+
+Compute the number of iterations required for SOR to converge.
+
+# Arguments
+- `c_0::Matrix{Float64}`: Initial concentration field
+- `omega::Float64`: Relaxation parameter
+- `tol::Float64`: Convergence tolerance
+- `i_max::Int`: Maximum iterations (default: 20000)
+- `check_interval::Int64`: Check convergence every N iterations (default: 1)
+
+# Returns
+- `Int`: Number of iterations required for convergence
+"""
 function get_iteration_count_SOR(c_0::Matrix{Float64}, omega::Float64, tol::Float64; i_max=20000, check_interval::Int64=1)
     c_new = copy(c_0)
 
