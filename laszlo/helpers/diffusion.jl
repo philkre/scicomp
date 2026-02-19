@@ -451,3 +451,34 @@ function get_iteration_count_SOR(c_0::Matrix{Float64}, omega::Float64, tol::Floa
 
     return i
 end
+
+function c_next_SOR_sink!(c::AbstractMatrix{Float64}, omega::Float64, sink_mask::AbstractMatrix{Bool})
+    N = size(c, 1)
+    Fo = 0.25 * omega
+
+    # # Apply sink mask
+    if any(sink_mask)
+        c[sink_mask] .= 0.0
+    end
+
+    @inbounds for i in 1:N
+        @inbounds for j in 2:N-1
+            # If this cell is a sink, set concentration to 0 and skip update
+            if any(sink_mask) && sink_mask[i, j]
+                continue
+            end
+
+            i_right = (i == N) ? 1 : i + 1
+            i_left = (i == 1) ? N : i - 1
+
+            c[i, j] = Fo * (
+                c[i_right, j] +
+                c[i_left, j] +
+                c[i, j+1] +
+                c[i, j-1]
+            ) + (1 - omega) * c[i, j]
+        end
+    end
+
+    return c
+end

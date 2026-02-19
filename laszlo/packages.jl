@@ -11,7 +11,8 @@ dependencies = [
     "JLD2",
     "SpecialFunctions",
     "Printf",
-    "LaTeXStrings"
+    "LaTeXStrings",
+    "ProgressMeter",
 ]
 
 Pkg.add(dependencies)
