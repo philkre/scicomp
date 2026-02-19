@@ -9,7 +9,8 @@ dependencies = [
     "BenchmarkTools",
     "FFMPEG",
     "JLD2",
-    "SpecialFunctions"
+    "SpecialFunctions",
+    "LaTeXStrings"
 ]
 
 Pkg.add(dependencies)

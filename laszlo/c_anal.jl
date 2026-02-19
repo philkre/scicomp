@@ -2,7 +2,7 @@ using Distributed
 using SpecialFunctions
 
 "Analytical solution for the diffusion equation with c(y=0)=0 and c(y=1)=1."
-function c_anal(x::Float64, t::Float64; D::Float64=D, i_max::Int=100)
+function c_anal(x::Float64, t::Float64; D::Float64, i_max::Int=100)
     denom = 2 * sqrt(D * t)
 
     function c_anal_i(x::Float64, i::Int)
