@@ -396,13 +396,17 @@ Solve the diffusion equation iteratively until convergence or maximum iterations
 # Returns
 - `Tuple{Matrix{Float64}, Vector{Float64}}`: Final concentration field and convergence history
 """
-function solve_until_tol(solver::Function, c_initial::Matrix{Float64}, tol::Float64, max_iters::Int, kwargs...; quiet::Bool=false)
+function solve_until_tol(solver::Function, c_initial::Matrix{Float64}, tol::Float64, max_iters::Int, args_solver...; quiet::Bool=false, kwargs_solver...)
+    # print("Solving with $solver... \n")
+    # print(kwargs_solver...)
+
     c_old = copy(c_initial)
     c_new = copy(c_initial)
 
     deltas = Float64[]
+
     for iter in 1:max_iters
-        c_new = solver(c_new, kwargs...)
+        c_new = solver(c_new, args_solver...; kwargs_solver...)
         push!(deltas, delta(c_old, c_new))
 
         if stopping_condition(c_old, c_new, tol)
@@ -452,19 +456,38 @@ function get_iteration_count_SOR(c_0::Matrix{Float64}, omega::Float64, tol::Floa
     return i
 end
 
+
+"""
+    c_next_SOR_sink!(c::AbstractMatrix{Float64}, omega::Float64, sink_mask::AbstractMatrix{Bool})
+
+Compute the next iteration using SOR with sink regions where concentration is fixed at zero.
+
+# Arguments
+- `c::AbstractMatrix{Float64}`: Concentration field (modified in-place)
+- `omega::Float64`: Relaxation parameter
+- `sink_mask::AbstractMatrix{Bool}`: Boolean mask indicating sink regions (true = sink)
+
+# Returns
+- `AbstractMatrix{Float64}`: Reference to the updated concentration field
+
+# Notes
+Cells marked as sinks have their concentration fixed at 0.0 and are not updated by the SOR iteration.
+"""
 function c_next_SOR_sink!(c::AbstractMatrix{Float64}, omega::Float64, sink_mask::AbstractMatrix{Bool})
     N = size(c, 1)
     Fo = 0.25 * omega
 
+    do_sink = any(sink_mask)
+
     # # Apply sink mask
-    if any(sink_mask)
+    if do_sink
         c[sink_mask] .= 0.0
     end
 
     @inbounds for i in 1:N
         @inbounds for j in 2:N-1
             # If this cell is a sink, set concentration to 0 and skip update
-            if any(sink_mask) && sink_mask[i, j]
+            if do_sink && sink_mask[i, j]
                 continue
             end
 
@@ -476,6 +499,67 @@ function c_next_SOR_sink!(c::AbstractMatrix{Float64}, omega::Float64, sink_mask:
                 c[i_left, j] +
                 c[i, j+1] +
                 c[i, j-1]
+            ) + (1 - omega) * c[i, j]
+        end
+    end
+
+    return c
+end
+
+
+"""
+    c_next_SOR_sink_insulate!(c::AbstractMatrix{Float64}, omega::Float64; sink_mask::AbstractMatrix{Bool}, insulate_mask::AbstractMatrix{Bool})
+
+Compute the next iteration using SOR with both sink regions and insulated boundaries.
+
+# Arguments
+- `c::AbstractMatrix{Float64}`: Concentration field (modified in-place)
+- `omega::Float64`: Relaxation parameter
+- `sink_mask::AbstractMatrix{Bool}`: Boolean mask for sink regions (default: no sinks)
+- `insulate_mask::AbstractMatrix{Bool}`: Boolean mask for insulated boundaries (default: no insulation)
+
+# Returns
+- `AbstractMatrix{Float64}`: Reference to the updated concentration field
+
+# Notes
+- Sink cells: concentration fixed at 0.0, not updated
+- Insulated cells: act as reflective boundaries (zero-flux condition)
+"""
+function c_next_SOR_sink_insulate!(c::AbstractMatrix{Float64}, omega::Float64; sink_mask::AbstractMatrix{Bool}=zeros(Bool, size(c)), insulate_mask::AbstractMatrix{Bool}=zeros(Bool, size(c)))
+    N = size(c, 1)
+    Fo = 0.25 * omega
+
+    do_sink = any(sink_mask)
+    do_insulate = any(insulate_mask)
+
+    # # Apply sink mask
+    if do_sink
+        c[sink_mask] .= 0.0
+    end
+
+    function fetch(requested::Int64, requested_j::Int64; local_i::Int64, local_j::Int64)::Float64
+        if do_insulate && insulate_mask[requested, requested_j]
+            return c[local_i, local_j]  # Reflect back the value of the local cell (insulated boundary)
+        else
+            return c[requested, requested_j]
+        end
+    end
+
+    @inbounds for i in 1:N
+        @inbounds for j in 2:N-1
+            # If this cell is a sink, set concentration to 0 and skip update
+            if do_sink && sink_mask[i, j]
+                continue
+            end
+
+            i_right = (i == N) ? 1 : i + 1
+            i_left = (i == 1) ? N : i - 1
+
+            c[i, j] = Fo * (
+                fetch(i_right, j; local_i=i, local_j=j) +
+                fetch(i_left, j; local_i=i, local_j=j) +
+                fetch(i, j + 1; local_i=i, local_j=j) +
+                fetch(i, j - 1; local_i=i, local_j=j)
             ) + (1 - omega) * c[i, j]
         end
     end
