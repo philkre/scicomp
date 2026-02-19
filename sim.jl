@@ -7,16 +7,17 @@ import ..DataIO: write_out!
 
 export run_wave, run_wave_1b, run_diffusion, run_steadystate, optimise_omega, sink_builder
 
+"""
+    sink_builder(N; fraction=0.2, shape=:square)
+
+Construct centered sink indices on an `N x N` grid, limited to interior cells.
+Supported shapes are `:square`, `:circle`, and `:triangle`.
+"""
 function sink_builder(
     N::Int;
     fraction::Float64=0.2,
     shape::Symbol=:square,
 )::Vector{CartesianIndex{2}}
-    """
-    Builds a centered sink on an N x N grid, restricted to interior points.
-    Supported shapes: :square (default), :circle, :triangle.
-    The sink extent is scaled by `fraction` of the interior size.
-    """
     @assert N >= 3 "sink_builder requires N >= 3, got $N"
     @assert 0.0 < fraction <= 1.0 "sink_builder requires 0 < fraction <= 1, got $fraction"
     if !(shape in (:square, :circle, :triangle))
@@ -64,6 +65,12 @@ function sink_builder(
     return sink_idxs
 end
 
+"""
+    run_wave(psi0, c, dx, dt, n_steps; method="euler", timing=false)
+
+Simulate a 1D wave for one initial condition and return an `(n, n_steps)` matrix
+of wave profiles over time.
+"""
 function run_wave(
     psi0::AbstractVector{<:Real},
     c::Real,
@@ -73,9 +80,6 @@ function run_wave(
     method::String="euler",
     timing::Bool=false,
 )
-    """
-    Runs the wave simulation for one initial condition.
-    """
     psi = collect(Float64, psi0)
     n = length(psi)
     v = zeros(n)
@@ -102,10 +106,13 @@ function run_wave(
     return psis
 end
 
+"""
+    run_wave_1b(c, dx, dt, n_steps, L; method="euler")
+
+Run the 1D wave simulation for the three assignment initial conditions and
+return a vector with three trajectory matrices.
+"""
 function run_wave_1b(c::Real, dx::Real, dt::Real, n_steps::Integer, L::Real; method::String="euler")
-    """
-    Runs the 1D wave simulation for the three assignment initial conditions.
-    """
     x = 0:dx:L
     psi_i = [sin(2 * pi * xi) for xi in x]
     psi_ii = [sin(5 * pi * xi) for xi in x]
@@ -118,6 +125,11 @@ function run_wave_1b(c::Real, dx::Real, dt::Real, n_steps::Integer, L::Real; met
     return [psis_i, psis_ii, psis_iii]
 end
 
+"""
+    run_diffusion(D, N, dy, dx, dt, steps, write_interval; timing=false, progress=false, filepath="output/data/output.h5")
+
+Run an explicit 2D diffusion simulation and periodically write snapshots to HDF5.
+"""
 function run_diffusion(
     D::Float64,
     N::Int,
@@ -130,9 +142,6 @@ function run_diffusion(
     progress::Bool=false,
     filepath::String="output/data/output.h5",
 )
-    """
-    Runs the diffusion simulation for a given parameter set.
-    """
     stab = 4 * dt * D / (dx * dx)
     @assert stab <= 1 "Stability condition violated: 4*D*dt/dx^2 must be <= 1, is $stab"
 
@@ -166,17 +175,21 @@ function run_diffusion(
     return nothing
 end
 
+"""
+    run_steadystate(c, epsilon; method="jacobi", omega=nothing, sink_indices=nothing, max_iters=1_000_000)
+
+Iterate a 2D Laplace solver until `maximum(abs.(c - c_prev)) < epsilon` or
+`max_iters` is reached. Returns `(c, iterations, deltas)`.
+"""
 function run_steadystate(
     c::Matrix{Float64},
     epsilon::Float64;
     method::String="jacobi",
     omega::Union{Nothing,Float64}=nothing,
     sink_indices::Union{Nothing,AbstractVector{Int},AbstractVector{CartesianIndex{2}}}=nothing,
+    sink_indices::Union{Nothing,AbstractVector{Int},AbstractVector{CartesianIndex{2}}}=nothing,
     max_iters::Int=1_000_000,
 )::Tuple{Matrix{Float64},Int64,Vector{Float64}}
-    """
-    Runs steady-state iterations until convergence to epsilon step difference.
-    """
     if !(method in ("jacobi", "gauss-seidel", "sor"))
         error("Unknown method '$method'. Use 'jacobi', 'gauss-seidel', or 'sor'.")
     end
@@ -196,12 +209,25 @@ function run_steadystate(
         [lin[idx] for idx in sink_indices]
     end
 
+    # Convert sink indices once to linear Int indices for faster repeated writes.
+    sink_linear::Union{Nothing,Vector{Int}} = if isnothing(sink_indices)
+        nothing
+    elseif sink_indices isa AbstractVector{Int}
+        collect(Int, sink_indices)
+    else
+        lin = LinearIndices(c)
+        [lin[idx] for idx in sink_indices]
+    end
+
     # Resolve method-specific iteration once (outside convergence loop).
     iter_step! = if method == "jacobi"
         c_local -> laplace_jacobi!(c_local; sink_indices=sink_linear)
+        c_local -> laplace_jacobi!(c_local; sink_indices=sink_linear)
     elseif method == "gauss-seidel"
         c_local -> laplace_gauss_seidel!(c_local; sink_indices=sink_linear)
+        c_local -> laplace_gauss_seidel!(c_local; sink_indices=sink_linear)
     else
+        c_local -> laplace_sor!(c_local, omega_eff; sink_indices=sink_linear)
         c_local -> laplace_sor!(c_local, omega_eff; sink_indices=sink_linear)
     end
 
@@ -224,6 +250,12 @@ function run_steadystate(
     return c, its, deltas
 end
 
+"""
+    optimise_omega(epsilon, omegas, Ns; max_iters=200_000, omega_band=0.12, omega_min=1.0, omega_max=1.98, sink_indices=nothing)
+
+Evaluate SOR iteration counts over an `(omega, N)` sweep near the theoretical
+optimal relaxation factor and return `(iterations, converged, computed)` masks.
+"""
 function optimise_omega(
     epsilon::Float64,
     omegas::AbstractVector{Float64},
@@ -238,14 +270,13 @@ function optimise_omega(
         AbstractVector{CartesianIndex{2}},
         Function,
     }=nothing,
+    sink_indices::Union{
+        Nothing,
+        AbstractVector{Int},
+        AbstractVector{CartesianIndex{2}},
+        Function,
+    }=nothing,
 )::Tuple{Matrix{Int64},BitMatrix,BitMatrix}
-    """
-    Finds optimal omega for SOR over a well-behaved (omega, N) region.
-    Region per N is centered around:
-    omega*(N) = 2 / (1 + sin(pi/(N-1)))
-    and restricted to [omega*(N)-omega_band, omega*(N)+omega_band],
-    additionally clipped to [omega_min, omega_max].
-    """
     its_vec = Matrix{Int64}(undef, length(omegas), length(Ns))
     converged = falses(length(omegas), length(Ns))
     computed = falses(length(omegas), length(Ns))
@@ -277,6 +308,23 @@ function optimise_omega(
             collect(sink_indices)
         end
 
+        sink_for_N = if isnothing(sink_indices)
+            nothing
+        elseif sink_indices isa Function
+            sink_gen = sink_indices(N)
+            if isnothing(sink_gen)
+                nothing
+            elseif sink_gen isa AbstractVector{Int}
+                sink_gen
+            else
+                collect(sink_gen)
+            end
+        elseif sink_indices isa AbstractVector{Int}
+            sink_indices
+        else
+            collect(sink_indices)
+        end
+
         for (i, omega) in enumerate(omegas)
             if omega < lower[j] || omega > upper[j]
                 its_vec[i, j] = 0
@@ -288,6 +336,14 @@ function optimise_omega(
             c_local = zeros(N, N)
             c_local[:, 1] .= 0
             c_local[:, end] .= 1
+            _, its, _ = run_steadystate(
+                c_local,
+                epsilon;
+                method="sor",
+                omega=omega,
+                sink_indices=sink_for_N,
+                max_iters=max_iters,
+            )
             _, its, _ = run_steadystate(
                 c_local,
                 epsilon;

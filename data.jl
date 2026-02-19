@@ -4,6 +4,12 @@ using HDF5
 
 export write_out!, load_output
 
+"""
+    write_out!(c, filepath, step, dx, dy; t=nothing)
+
+Append one concentration snapshot `c` and metadata to an HDF5 output file.
+Creates datasets on first write and extends them on subsequent writes.
+"""
 function write_out!(
     c::Matrix{Float64},
     filepath::String,
@@ -12,9 +18,6 @@ function write_out!(
     dy::Float64;
     t=nothing,
 )
-    """
-    Appends concentration data to an HDF5 file.
-    """
     mkpath(dirname(filepath))
     Nx, Ny = size(c)
 
@@ -78,10 +81,13 @@ function write_out!(
     return nothing
 end
 
+"""
+    load_output(filepath)
+
+Load concentration snapshots, grid spacing, step indices, and optional times
+from an HDF5 output file.
+"""
 function load_output(filepath::String)
-    """
-    Loads diffusion data and metadata from an HDF5 file.
-    """
     h5open(filepath, "r") do f
         c = read(f["c"])
         dx = read(attributes(f)["dx"])

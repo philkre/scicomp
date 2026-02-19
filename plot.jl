@@ -12,6 +12,12 @@ import ..DataIO: load_output
 
 export plot_animation, plot_profiles, plot_2d_concentration, plot_wave_final, animate_wave_all, plot_steadystate, plot_concentration_profiles_steady, plot_convergence_its, plot_omega_optimisation, plot_omega_sweep_panels
 
+"""
+    _sink_mask(dims, sink_indices)
+
+Build a boolean mask for sink cells with size `dims`.
+Returns `nothing` when no sink indices are provided.
+"""
 function _sink_mask(
     dims::Tuple{Int,Int},
     sink_indices::Union{Nothing,AbstractVector{Int},AbstractVector{CartesianIndex{2}}},
@@ -24,6 +30,11 @@ function _sink_mask(
     return mask
 end
 
+"""
+    _overlay_sink_outline!(p, x, y, sink_mask)
+
+Overlay a contour outline for the sink region on an existing plot.
+"""
 function _overlay_sink_outline!(
     p,
     x::AbstractVector{<:Real},
@@ -47,6 +58,11 @@ function _overlay_sink_outline!(
     return nothing
 end
 
+"""
+    _overlay_sink_silly!(p, x, y, sink_mask, silly, silly_image_path)
+
+Optionally overlay an image inside the sink bounding box when `silly=true`.
+"""
 function _overlay_sink_silly!(
     p,
     x::AbstractVector{<:Real},
@@ -89,6 +105,11 @@ function _overlay_sink_silly!(
     return nothing
 end
 
+"""
+    _save_plot(p, outfile)
+
+Save a plot using PNG-specific output for `.png` extensions and `savefig` otherwise.
+"""
 function _save_plot(p, outfile::String)
     ext = lowercase(splitext(outfile)[2])
     if ext == ".png"
@@ -99,6 +120,11 @@ function _save_plot(p, outfile::String)
     return outfile
 end
 
+"""
+    plot_animation(filepath="output/data/output.h5"; fps=30, filename="output/img/diffusion_anim.mp4", max_frames=300, stride=nothing)
+
+Load diffusion output from HDF5 and generate a heatmap animation over time.
+"""
 function plot_animation(
     filepath::String="output/data/output.h5";
     fps::Int=30,
@@ -106,9 +132,6 @@ function plot_animation(
     max_frames::Int=300,
     stride::Union{Int,Nothing}=nothing,
 )
-    """
-    Loads diffusion data and creates an animated heatmap over time.
-    """
     c, dx, dy, steps, _ = load_output(filepath)
     nt = size(c, 3)
 
@@ -139,6 +162,12 @@ function plot_animation(
     return nothing
 end
 
+"""
+    plot_profiles(filepath="output/data/output.h5", output="output/img/profiles.png"; times=Float64[], x_index=0, average_x=true, D=1.0, n_terms=200)
+
+Plot concentration profiles along `y` at selected times and optionally compare
+with the analytical diffusion profile.
+"""
 function plot_profiles(
     filepath::String="output/data/output.h5",
     output::String="output/img/profiles.png";
@@ -148,9 +177,6 @@ function plot_profiles(
     D::Float64=1.0,
     n_terms::Int=200,
 )
-    """
-    Plots concentration as a function of y for selected time points.
-    """
     c, _, dy, _, tvals = load_output(filepath)
     y = (0:size(c, 2)-1) .* dy
     L = y[end]
@@ -214,14 +240,16 @@ function plot_profiles(
     return nothing
 end
 
+"""
+    plot_2d_concentration(filepath="output/data/output.h5", output="output/img/concentration.png", timesteps=[1.0])
+
+Render 2D concentration heatmaps for the requested physical times.
+"""
 function plot_2d_concentration(
     filepath::String="output/data/output.h5",
     output::String="output/img/concentration.png",
     timesteps::Vector{Float64}=[1.0],
 )
-    """
-    Plots 2D heatmaps of concentration for requested times.
-    """
     c, dx, dy, _, tvals = load_output(filepath)
     if tvals === nothing
         error("No time dataset found in $filepath")
@@ -263,15 +291,17 @@ function plot_2d_concentration(
     return outfile
 end
 
+"""
+    plot_wave_final(psiss, x, title_text; output="output/img/figure_1A.png")
+
+Plot final-time wave profiles for multiple simulations on one axis.
+"""
 function plot_wave_final(
     psiss::Vector{<:AbstractMatrix},
     x::AbstractVector{<:Real},
     title_text::String;
     output::String="output/img/figure_1A.png",
 )
-    """
-    Plots final-time wave profiles for multiple initial conditions.
-    """
     p = plot(dpi=300)
     for (i, psis) in enumerate(psiss)
         plot!(p, x, psis[:, end], label="\\Psi_$i")
@@ -284,6 +314,11 @@ function plot_wave_final(
     return nothing
 end
 
+"""
+    animate_wave_all(psiss, x; fps=30, ylim=(-1, 1), filename="output/img/animation_1C.mp4")
+
+Create an MP4 animation for multiple wave trajectories.
+"""
 function animate_wave_all(
     psiss::Vector{<:AbstractMatrix},
     x::AbstractVector{<:Real};
@@ -291,9 +326,6 @@ function animate_wave_all(
     ylim::Tuple{Real,Real}=(-1, 1),
     filename::String="output/img/animation_1C.mp4",
 )
-    """
-    Creates a wave animation from multiple simulated profiles.
-    """
     nt = size(psiss[1], 2)
     anim = @animate for n in 1:nt
         p = plot(ylim=ylim, legend=:bottom, size=(1200, 800), show=false)
@@ -309,6 +341,12 @@ function animate_wave_all(
     return nothing
 end
 
+"""
+    plot_steadystate(c, output="output/img/steadystate.png"; sink_indices=nothing, silly_image_path="input/sink.png", silly=false)
+
+Plot a steady-state concentration heatmap and optionally overlay sink outlines
+or an image on the sink region.
+"""
 function plot_steadystate(
     c::Matrix{Float64},
     output::String="output/img/steadystate.png";
@@ -316,9 +354,6 @@ function plot_steadystate(
     silly_image_path::String="input/sink.png",
     silly::Bool=false,
 )
-    """
-    Plots the steady state concentration profile as a 2D heatmap.
-    """
     x = range(0, stop=1, length=size(c, 1))
     y = range(0, stop=1, length=size(c, 2))
 
@@ -348,16 +383,17 @@ function plot_steadystate(
     return outfile
 end
 
+"""
+    plot_concentration_profiles_steady(cs, methods=String[], output="output/img/steadystate_profiles.png")
+
+Plot steady-state concentration profiles against an analytical reference and
+a log-scale absolute error panel.
+"""
 function plot_concentration_profiles_steady(
     cs::Vector{Matrix{Float64}},
     methods::Vector{String}=String[],
     output::String="output/img/steadystate_profiles.png",
 )
-    """
-    1. Plots concentration profiles along y for steady-state solutions and compares
-    against an analytical profile on the same y-grid.
-    2. Plots difference of methods against analytical solution in second subplot
-    """
     if isempty(cs)
         error("cs must contain at least one solution matrix")
     end
@@ -399,15 +435,16 @@ function plot_concentration_profiles_steady(
     savefig(p, output)
 end
 
+"""
+    plot_convergence_its(deltas, methods=String[], output="output/img/steadystate_convergence.png")
+
+Plot per-iteration convergence deltas for iterative steady-state solvers.
+"""
 function plot_convergence_its(
     deltas::Vector{Vector{Float64}},
     methods::Vector{String}=String[],
     output::String="output/img/steadystate_convergence.png",
 )
-    """
-    Plots the number of iterations to convergence for different methods.
-    """
-
     p = plot(dpi=300, yscale=:log10, title="Steady-state convergence", legend=:topright)
     for (i, delta) in enumerate(deltas)
         label = isempty(methods) ? "Method $i" : methods[i]
@@ -419,6 +456,12 @@ function plot_convergence_its(
 
 end
 
+"""
+    plot_omega_optimisation(omegas, iterations, output="output/img/optimise_omega.png", max_iters=nothing, converged=nothing, computed=nothing)
+
+Plot iteration counts versus relaxation factor for one grid size, optionally
+marking converged and capped runs.
+"""
 function plot_omega_optimisation(
     omegas::AbstractVector{Float64},
     iterations::AbstractVector{<:Integer},
@@ -427,9 +470,6 @@ function plot_omega_optimisation(
     converged::Union{Nothing,AbstractVector{Bool}}=nothing,
     computed::Union{Nothing,AbstractVector{Bool}}=nothing,
 )
-    """
-    Plots the number of iterations to convergence for different omega values in SOR.
-    """
     if length(omegas) != length(iterations)
         error("omegas and iterations must have the same length")
     end
@@ -488,6 +528,12 @@ function plot_omega_optimisation(
 
 end
 
+"""
+    plot_omega_optimisation(omegas, Ns, iterations, output="output/img/optimise_omega.png", max_iters=nothing, converged=nothing, computed=nothing)
+
+Plot omega-optimisation curves for multiple grid sizes (`N`) using a matrix of
+iteration counts.
+"""
 function plot_omega_optimisation(
     omegas::AbstractVector{Float64},
     Ns::AbstractVector{Int},
@@ -497,12 +543,6 @@ function plot_omega_optimisation(
     converged::Union{Nothing,AbstractMatrix{Bool}}=nothing,
     computed::Union{Nothing,AbstractMatrix{Bool}}=nothing,
 )
-    """
-    2D omega-optimisation plot for multiple grid sizes (one curve per N).
-
-    Expected `iterations` shape is (length(omegas), length(Ns)).
-    If transposed, it will be auto-corrected.
-    """
     nW = length(omegas)
     nN = length(Ns)
     itmat = iterations
@@ -567,6 +607,12 @@ function plot_omega_optimisation(
     savefig(p, output)
 end
 
+"""
+    plot_omega_sweep_panels(omegas, Ns, iterations, output="output/img/omega_sweep_panels.png", max_iters=nothing, converged=nothing, computed=nothing)
+
+Create a two-panel sweep summary with an omega-N iterations heatmap and
+best-omega trend against the theoretical reference.
+"""
 function plot_omega_sweep_panels(
     omegas::AbstractVector{Float64},
     Ns::AbstractVector{Int},
@@ -576,11 +622,6 @@ function plot_omega_sweep_panels(
     converged::Union{Nothing,AbstractMatrix{Bool}}=nothing,
     computed::Union{Nothing,AbstractMatrix{Bool}}=nothing,
 )
-    """
-    Two-panel visualization of omega-N sweep:
-    1) Heatmap of iterations over (omega, N)
-    2) Best converged omega(N) data points with theoretical reference curve
-    """
     nN = length(Ns)
     nW = length(omegas)
     itmat = iterations
