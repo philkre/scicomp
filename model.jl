@@ -52,7 +52,21 @@ function diffusion2d!(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)
     return nothing
 end
 
-function laplace_jacobi!(c::Matrix{Float64})
+function _apply_sink!(
+    c::Matrix{Float64},
+    sink_indices::Union{Nothing,AbstractVector{Int},AbstractVector{CartesianIndex{2}}},
+)
+    if isnothing(sink_indices)
+        return nothing
+    end
+    c[sink_indices] .= 0.0
+    return nothing
+end
+
+function laplace_jacobi!(
+    c::Matrix{Float64};
+    sink_indices::Union{Nothing,AbstractVector{Int},AbstractVector{CartesianIndex{2}}}=nothing,
+)
     """
     Discretisation of the 2D Laplace equation:
     0 = D * (d^2 C / dx^2 + d^2 C / dy^2)
@@ -70,6 +84,7 @@ function laplace_jacobi!(c::Matrix{Float64})
                 c_curr[ip, j] + c_curr[im, j] +
                 c_curr[i, j+1] + c_curr[i, j-1]
             )
+            _apply_sink!(c, sink_indices)
         end
     end
 
@@ -83,7 +98,10 @@ function laplace_jacobi!(c::Matrix{Float64})
     return nothing
 end
 
-function laplace_gauss_seidel!(c::Matrix{Float64})
+function laplace_gauss_seidel!(
+    c::Matrix{Float64};
+    sink_indices::Union{Nothing,AbstractVector{Int},AbstractVector{CartesianIndex{2}}}=nothing,
+)
     """
     Gauss-Seidel iteration for the 2D Laplace equation.
     """
@@ -98,6 +116,7 @@ function laplace_gauss_seidel!(c::Matrix{Float64})
                 c[ip, j] + c[im, j] +
                 c[i, j+1] + c[i, j-1]
             )
+            _apply_sink!(c, sink_indices)
         end
     end
 
@@ -111,7 +130,11 @@ function laplace_gauss_seidel!(c::Matrix{Float64})
     return nothing
 end
 
-function laplace_sor!(c::Matrix{Float64}, omega::Float64)
+function laplace_sor!(
+    c::Matrix{Float64},
+    omega::Float64;
+    sink_indices::Union{Nothing,AbstractVector{Int},AbstractVector{CartesianIndex{2}}}=nothing,
+)
     """
     Successive over-relaxation for the 2D Laplace equation.
     """
@@ -127,6 +150,7 @@ function laplace_sor!(c::Matrix{Float64}, omega::Float64)
                 c[i, j+1] + c[i, j-1]
             )
             c[i, j] = (1 - omega) * c[i, j] + omega * c_new
+            _apply_sink!(c, sink_indices)
         end
     end
 

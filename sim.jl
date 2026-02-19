@@ -5,7 +5,64 @@ using ProgressMeter
 import ..Model: diffusion2d!, euler_step!, leapfrog_step!, laplace_jacobi!, laplace_gauss_seidel!, laplace_sor!
 import ..DataIO: write_out!
 
-export run_wave, run_wave_1b, run_diffusion, run_steadystate, optimise_omega
+export run_wave, run_wave_1b, run_diffusion, run_steadystate, optimise_omega, sink_builder
+
+function sink_builder(
+    N::Int;
+    fraction::Float64=0.2,
+    shape::Symbol=:square,
+)::Vector{CartesianIndex{2}}
+    """
+    Builds a centered sink on an N x N grid, restricted to interior points.
+    Supported shapes: :square (default), :circle, :triangle.
+    The sink extent is scaled by `fraction` of the interior size.
+    """
+    @assert N >= 3 "sink_builder requires N >= 3, got $N"
+    @assert 0.0 < fraction <= 1.0 "sink_builder requires 0 < fraction <= 1, got $fraction"
+    if !(shape in (:square, :circle, :triangle))
+        error("Unknown sink shape '$shape'. Use :square, :circle, or :triangle.")
+    end
+
+    interior_n = N - 2
+    sink_side = clamp(round(Int, fraction * interior_n), 1, interior_n)
+    sink_start = clamp(fld(N - sink_side, 2) + 1, 2, N - 1)
+    sink_end = sink_start + sink_side - 1
+
+    if shape == :square
+        return vec(CartesianIndices((sink_start:sink_end, sink_start:sink_end)))
+    end
+
+    cx = 0.5 * (sink_start + sink_end)
+    cy = 0.5 * (sink_start + sink_end)
+    half = 0.5 * sink_side
+
+    sink_idxs = CartesianIndex{2}[]
+    for j in sink_start:sink_end
+        for i in sink_start:sink_end
+            if shape == :circle
+                dx = (i - cx) / half
+                dy = (j - cy) / half
+                if dx * dx + dy * dy <= 1.0
+                    push!(sink_idxs, CartesianIndex(i, j))
+                end
+            elseif shape == :triangle
+                # Isosceles triangle pointing up, inscribed in the sink bounding box.
+                if sink_side == 1
+                    push!(sink_idxs, CartesianIndex(i, j))
+                else
+                    t = (j - sink_start) / (sink_side - 1)  # 0 at top, 1 at bottom
+                    width = max(1.0, 1.0 + t * (sink_side - 1))
+                    left = cx - 0.5 * (width - 1.0)
+                    right = cx + 0.5 * (width - 1.0)
+                    if left <= i <= right
+                        push!(sink_idxs, CartesianIndex(i, j))
+                    end
+                end
+            end
+        end
+    end
+    return sink_idxs
+end
 
 function run_wave(
     psi0::AbstractVector{<:Real},
@@ -114,6 +171,7 @@ function run_steadystate(
     epsilon::Float64;
     method::String="jacobi",
     omega::Union{Nothing,Float64}=nothing,
+    sink_indices::Union{Nothing,AbstractVector{Int},AbstractVector{CartesianIndex{2}}}=nothing,
     max_iters::Int=1_000_000,
 )::Tuple{Matrix{Float64},Int64,Vector{Float64}}
     """
@@ -128,13 +186,23 @@ function run_steadystate(
         @assert 0.0 < omega_eff < 2.0 "SOR requires 0 < omega < 2, got $omega_eff"
     end
 
+    # Convert sink indices once to linear Int indices for faster repeated writes.
+    sink_linear::Union{Nothing,Vector{Int}} = if isnothing(sink_indices)
+        nothing
+    elseif sink_indices isa AbstractVector{Int}
+        collect(Int, sink_indices)
+    else
+        lin = LinearIndices(c)
+        [lin[idx] for idx in sink_indices]
+    end
+
     # Resolve method-specific iteration once (outside convergence loop).
     iter_step! = if method == "jacobi"
-        laplace_jacobi!
+        c_local -> laplace_jacobi!(c_local; sink_indices=sink_linear)
     elseif method == "gauss-seidel"
-        laplace_gauss_seidel!
+        c_local -> laplace_gauss_seidel!(c_local; sink_indices=sink_linear)
     else
-        c_local -> laplace_sor!(c_local, omega_eff)
+        c_local -> laplace_sor!(c_local, omega_eff; sink_indices=sink_linear)
     end
 
     deltas = Float64[]
@@ -164,6 +232,12 @@ function optimise_omega(
     omega_band::Float64=0.12,
     omega_min::Float64=1.0,
     omega_max::Float64=1.98,
+    sink_indices::Union{
+        Nothing,
+        AbstractVector{Int},
+        AbstractVector{CartesianIndex{2}},
+        Function,
+    }=nothing,
 )::Tuple{Matrix{Int64},BitMatrix,BitMatrix}
     """
     Finds optimal omega for SOR over a well-behaved (omega, N) region.
@@ -186,6 +260,23 @@ function optimise_omega(
     end
 
     for (j, N) in enumerate(Ns)
+        sink_for_N = if isnothing(sink_indices)
+            nothing
+        elseif sink_indices isa Function
+            sink_gen = sink_indices(N)
+            if isnothing(sink_gen)
+                nothing
+            elseif sink_gen isa AbstractVector{Int}
+                sink_gen
+            else
+                collect(sink_gen)
+            end
+        elseif sink_indices isa AbstractVector{Int}
+            sink_indices
+        else
+            collect(sink_indices)
+        end
+
         for (i, omega) in enumerate(omegas)
             if omega < lower[j] || omega > upper[j]
                 its_vec[i, j] = 0
@@ -197,7 +288,14 @@ function optimise_omega(
             c_local = zeros(N, N)
             c_local[:, 1] .= 0
             c_local[:, end] .= 1
-            _, its, _ = run_steadystate(c_local, epsilon; method="sor", omega=omega, max_iters=max_iters)
+            _, its, _ = run_steadystate(
+                c_local,
+                epsilon;
+                method="sor",
+                omega=omega,
+                sink_indices=sink_for_N,
+                max_iters=max_iters,
+            )
             its_vec[i, j] = its
             converged[i, j] = its < max_iters
             next!(p)

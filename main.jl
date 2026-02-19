@@ -1,3 +1,7 @@
+import Pkg
+Pkg.activate(@__DIR__)
+Pkg.instantiate()
+
 using Printf
 using Plots
 
@@ -6,7 +10,7 @@ include("data.jl")
 include("sim.jl")
 include("plot.jl")
 
-using .Sim: run_diffusion, run_wave, run_wave_1b, run_steadystate, optimise_omega
+using .Sim: run_diffusion, run_wave, run_wave_1b, run_steadystate, optimise_omega, sink_builder
 using .Plotting: plot_animation, plot_profiles, plot_2d_concentration, plot_wave_final, animate_wave_all, plot_steadystate, plot_concentration_profiles_steady, plot_convergence_its, plot_omega_optimisation, plot_omega_sweep_panels
 
 
@@ -72,57 +76,128 @@ function main_steadystate()
     c[:, end] .= 1
     epsilon = 1e-6
 
+    ALL_METHODS = false
+    PROFILES = false
+    CONVERGENCE = false
+    OMEGAS = false
+    SINKS = true
+
     # run iterations
-    c_jacobi, its_jacobi, deltas_jacobi = run_steadystate(copy(c), epsilon; method="jacobi")
-    c_gauss_seidel, its_gauss_seidel, deltas_gauss_seidel = run_steadystate(copy(c), epsilon; method="gauss-seidel")
-    omega_sor = 1.5
-    c_sor15, its_sor15, deltas_sor15 = run_steadystate(copy(c), epsilon; method="sor", omega=omega_sor)
-    omega_sor = 1.9
-    c_sor19, its_sor19, deltas_sor19 = run_steadystate(copy(c), epsilon; method="sor", omega=omega_sor)
-    #plot_steadystate(c_jacobi, "output/img/steadystate_jacobi.png")
 
-    # plot profiles
-    #plot_concentration_profiles_steady([c_jacobi, c_gauss_seidel, c_sor15, c_sor19], ["Jacobi", "Gauss-Seidel", "SOR 1.5", "SOR 1.9"], "output/img/steadystate_profiles.png")
-    println("Iterations for Jacobi: $its_jacobi")
-    println("Iterations for Gauss-Seidel: $its_gauss_seidel")
-    println("Iterations for SOR (omega=1.5): $its_sor15")
-    println("Iterations for SOR (omega=1.9): $its_sor19")
+    if ALL_METHODS
+        c_jacobi, its_jacobi, deltas_jacobi = run_steadystate(copy(c), epsilon; method="jacobi")
+        c_gauss_seidel, its_gauss_seidel, deltas_gauss_seidel = run_steadystate(copy(c), epsilon; method="gauss-seidel")
+        omega_sor = 1.5
+        c_sor15, its_sor15, deltas_sor15 = run_steadystate(copy(c), epsilon; method="sor", omega=omega_sor)
+        omega_sor = 1.9
+        c_sor19, its_sor19, deltas_sor19 = run_steadystate(copy(c), epsilon; method="sor", omega=omega_sor)
 
-    # plot convergence
-    #plot_convergence_its(
-    #    [deltas_jacobi, deltas_gauss_seidel, deltas_sor15, deltas_sor19],
-    #    ["Jacobi", "Gauss-Seidel", "SOR 1.5", "SOR 1.9"],
-    #    "output/img/steadystate_convergence.png")
+        if PROFILES
+            # plot profiles
+            plot_concentration_profiles_steady([c_jacobi, c_gauss_seidel, c_sor15, c_sor19], ["Jacobi", "Gauss-Seidel", "SOR 1.5", "SOR 1.9"], "output/img/steadystate_profiles.png")
+            println("Iterations for Jacobi: $its_jacobi")
+            println("Iterations for Gauss-Seidel: $its_gauss_seidel")
+            println("Iterations for SOR (omega=1.5): $its_sor15")
+            println("Iterations for SOR (omega=1.9): $its_sor19")
+        end
 
-    # find optimal omega
-    omegas = 1.7:0.01:1.95
-    Ns = 10:10:100
-    max_iters_omega = 30_000
-    its_sor, conv_sor, comp_sor = optimise_omega(
-        epsilon,
-        omegas,
-        Ns;
-        max_iters=max_iters_omega,
-        omega_band=0.12,
-        omega_min=1.0,
-        omega_max=1.98,
-    )
-    # find function fit for optimal omega vs iterations and plot
+        if CONVERGENCE
+            # plot convergence
+            plot_convergence_its(
+                [deltas_jacobi, deltas_gauss_seidel, deltas_sor15, deltas_sor19],
+                ["Jacobi", "Gauss-Seidel", "SOR 1.5", "SOR 1.9"],
+                "output/img/steadystate_convergence.png")
+        end
 
-    #plot_omega_optimisation(omegas,
-    #    its_sor[:, end],
-    #    "output/img/omega_optimisation.png",
-    #    max_iters_omega)
+        if OMEGAS
+            # find optimal omega
+            omegas = 1.7:0.01:1.95
+            Ns = 10:10:100
+            max_iters_omega = 30_000
+            its_sor, conv_sor, comp_sor = optimise_omega(
+                epsilon,
+                omegas,
+                Ns;
+                max_iters=max_iters_omega,
+                omega_band=0.12,
+                omega_min=1.0,
+                omega_max=1.98,
+            )
 
-    plot_omega_sweep_panels(
-        omegas,
-        Ns,
-        its_sor,
-        "output/img/omega_sweep_panels.png",
-        max_iters_omega,
-        conv_sor,
-        comp_sor,
-    )
+            # find function fit for optimal omega vs iterations and plot
+
+            plot_omega_optimisation(omegas,
+                its_sor[:, end],
+                "output/img/omega_optimisation.png",
+                max_iters_omega,
+                conv_sor[:, end],
+                comp_sor[:, end],
+            )
+
+            plot_omega_sweep_panels(
+                omegas,
+                Ns,
+                its_sor,
+                "output/img/omega_sweep_panels.png",
+                max_iters_omega,
+                conv_sor,
+                comp_sor,
+            )
+
+        end
+
+    end
+
+    if SINKS
+        sink_indices = sink_builder(N, shape=:circle)
+
+        c_sink_jacobi, its_sink_jacobi, deltas_sink_jacobi = run_steadystate(copy(c), epsilon; method="jacobi", sink_indices=sink_indices)
+        c_sink_gauss_seidel, its_sink_gauss_seidel, deltas_sink_gauss_seidel = run_steadystate(copy(c), epsilon; method="gauss-seidel", sink_indices=sink_indices)
+        omega_sor = 1.5
+        c_sink_sor15, its_sink_sor15, deltas_sink_sor15 = run_steadystate(copy(c), epsilon; method="sor", omega=omega_sor, sink_indices=sink_indices)
+        omega_sor = 1.9
+        c_sink_sor19, its_sink_sor19, deltas_sink_sor19 = run_steadystate(copy(c), epsilon; method="sor", omega=omega_sor, sink_indices=sink_indices)
+
+        println("Iterations for Jacobi with sink: $its_sink_jacobi")
+        println("Iterations for Gauss-Seidel with sink: $its_sink_gauss_seidel")
+        println("Iterations for SOR (omega=1.5) with sink: $its_sink_sor15")
+        println("Iterations for SOR (omega=1.9) with sink: $its_sink_sor19")
+
+        #plot_steadystate(c_sink_jacobi, "output/img/steadystate_jacobi_sink_silly.png"; sink_indices=sink_indices, silly=true)
+
+        # investigate omega optimisation with sink
+        omegas = 1.7:0.01:1.95
+        Ns = 10:10:100
+        max_iters_omega = 30_000
+        its_sor_sink, conv_sor_sink, comp_sor_sink = optimise_omega(
+            epsilon,
+            omegas,
+            Ns;
+            max_iters=max_iters_omega,
+            omega_band=0.12,
+            omega_min=1.0,
+            omega_max=1.98,
+            sink_indices=sink_builder,
+        )
+        plot_omega_sweep_panels(
+            omegas,
+            Ns,
+            its_sor_sink,
+            "output/img/omega_sweep_panels_sink.png",
+            max_iters_omega,
+            conv_sor_sink,
+            comp_sor_sink,
+        )
+
+        plot_omega_optimisation(omegas,
+            its_sor_sink[:, end],
+            "output/img/omega_optimisation_sink.png",
+            max_iters_omega,
+            conv_sor_sink[:, end],
+            comp_sor_sink[:, end],
+        )
+
+    end
 end
 
 function main()

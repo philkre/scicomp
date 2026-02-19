@@ -3,6 +3,7 @@ module Plotting
 using Plots
 using LinearAlgebra
 using Statistics
+using FileIO
 
 default(fontfamily="Computer Modern")
 
@@ -10,6 +11,93 @@ import ..Model: analytical_profile_series
 import ..DataIO: load_output
 
 export plot_animation, plot_profiles, plot_2d_concentration, plot_wave_final, animate_wave_all, plot_steadystate, plot_concentration_profiles_steady, plot_convergence_its, plot_omega_optimisation, plot_omega_sweep_panels
+
+function _sink_mask(
+    dims::Tuple{Int,Int},
+    sink_indices::Union{Nothing,AbstractVector{Int},AbstractVector{CartesianIndex{2}}},
+)
+    if isnothing(sink_indices)
+        return nothing
+    end
+    mask = falses(dims...)
+    mask[sink_indices] .= true
+    return mask
+end
+
+function _overlay_sink_outline!(
+    p,
+    x::AbstractVector{<:Real},
+    y::AbstractVector{<:Real},
+    sink_mask::Union{Nothing,BitMatrix},
+)
+    if isnothing(sink_mask) || !any(sink_mask)
+        return nothing
+    end
+
+    contour!(
+        p,
+        x,
+        y,
+        Float64.(sink_mask)',
+        levels=[0.5],
+        color=:white,
+        linewidth=2,
+        label=false,
+    )
+    return nothing
+end
+
+function _overlay_sink_silly!(
+    p,
+    x::AbstractVector{<:Real},
+    y::AbstractVector{<:Real},
+    sink_mask::Union{Nothing,BitMatrix},
+    silly::Bool,
+    silly_image_path::String,
+)
+    if !silly || isnothing(sink_mask) || !any(sink_mask)
+        return nothing
+    end
+
+    img_path = isabspath(silly_image_path) ? silly_image_path : normpath(joinpath(@__DIR__, silly_image_path))
+    if !isfile(img_path)
+        @warn "Silly image not found, skipping overlay." silly_image_path img_path
+        return nothing
+    end
+
+    img = try
+        load(img_path)
+    catch err
+        @warn "Failed to load silly image, skipping overlay." silly_image_path img_path exception = (err, catch_backtrace())
+        return nothing
+    end
+    img2d = ndims(img) == 2 ? img : img[:, :, 1]
+
+    rows = findall(vec(any(sink_mask, dims=2)))
+    cols = findall(vec(any(sink_mask, dims=1)))
+    i_min, i_max = minimum(rows), maximum(rows)
+    j_min, j_max = minimum(cols), maximum(cols)
+
+    plot!(
+        p,
+        [x[i_min], x[i_max]],
+        [y[j_min], y[j_max]],
+        img2d;
+        seriestype=:image,
+        label=false,
+    )
+    return nothing
+end
+
+function _save_plot(p, outfile::String)
+    ext = lowercase(splitext(outfile)[2])
+    if ext == ".png"
+        png(p, outfile)
+    else
+        savefig(p, outfile)
+    end
+    return outfile
+end
 
 function plot_animation(
     filepath::String="output/data/output.h5";
@@ -158,6 +246,7 @@ function plot_2d_concentration(
             aspect_ratio=1,
             color=:viridis,
         )
+
         push!(subplots, p)
     end
 
@@ -167,10 +256,11 @@ function plot_2d_concentration(
         size=(1800, 1200),
         dpi=300,
     )
-    mkpath(dirname(output))
-    savefig(p, output)
+    outfile = abspath(output)
+    mkpath(dirname(outfile))
+    _save_plot(p, outfile)
 
-    return nothing
+    return outfile
 end
 
 function plot_wave_final(
@@ -219,7 +309,13 @@ function animate_wave_all(
     return nothing
 end
 
-function plot_steadystate(c::Matrix{Float64}, output::String="output/img/steadystate.png")
+function plot_steadystate(
+    c::Matrix{Float64},
+    output::String="output/img/steadystate.png";
+    sink_indices::Union{Nothing,AbstractVector{Int},AbstractVector{CartesianIndex{2}}}=nothing,
+    silly_image_path::String="input/sink.png",
+    silly::Bool=false,
+)
     """
     Plots the steady state concentration profile as a 2D heatmap.
     """
@@ -237,9 +333,19 @@ function plot_steadystate(c::Matrix{Float64}, output::String="output/img/steadys
         color=:viridis,
         dpi=300
     )
-    mkpath(dirname(output))
-    savefig(p, output)
+    sink_mask = _sink_mask(size(c), sink_indices)
+    if sink_indices !== nothing
+        _overlay_sink_outline!(p, x, y, sink_mask)
 
+        if silly
+            _overlay_sink_silly!(p, x, y, sink_mask, silly, silly_image_path)
+        end
+    end
+
+    outfile = abspath(output)
+    mkpath(dirname(outfile))
+    _save_plot(p, outfile)
+    return outfile
 end
 
 function plot_concentration_profiles_steady(
@@ -315,15 +421,23 @@ end
 
 function plot_omega_optimisation(
     omegas::AbstractVector{Float64},
-    iterations::AbstractVector{Int64},
+    iterations::AbstractVector{<:Integer},
     output::String="output/img/optimise_omega.png",
     max_iters::Union{Nothing,Int}=nothing,
+    converged::Union{Nothing,AbstractVector{Bool}}=nothing,
+    computed::Union{Nothing,AbstractVector{Bool}}=nothing,
 )
     """
     Plots the number of iterations to convergence for different omega values in SOR.
     """
     if length(omegas) != length(iterations)
         error("omegas and iterations must have the same length")
+    end
+    if !isnothing(converged) && length(converged) != length(iterations)
+        error("converged must have the same length as iterations")
+    end
+    if !isnothing(computed) && length(computed) != length(iterations)
+        error("computed must have the same length as iterations")
     end
 
     p = plot(
@@ -335,16 +449,23 @@ function plot_omega_optimisation(
         legend=:topleft,
     )
 
-    if isnothing(max_iters)
-        plot!(p, omegas, iterations, marker=:circle, label="all runs")
-    else
-        converged = iterations .< max_iters
-        capped = .!converged
+    comp_mask = isnothing(computed) ? trues(length(iterations)) : collect(computed)
+    positive_mask = iterations .> 0
 
-        if any(converged)
-            plot!(p, omegas[converged], iterations[converged], marker=:circle, label="converged")
-            local_omegas = omegas[converged]
-            local_iterations = iterations[converged]
+    if isnothing(max_iters)
+        valid = comp_mask .& positive_mask
+        if any(valid)
+            plot!(p, omegas[valid], iterations[valid], marker=:circle, label="all runs")
+        end
+    else
+        conv_mask = isnothing(converged) ? (iterations .< max_iters) : collect(converged)
+        converged_valid = comp_mask .& conv_mask .& positive_mask
+        capped = comp_mask .& .!conv_mask
+
+        if any(converged_valid)
+            plot!(p, omegas[converged_valid], iterations[converged_valid], marker=:circle, label="converged")
+            local_omegas = omegas[converged_valid]
+            local_iterations = iterations[converged_valid]
             i_best = argmin(local_iterations)
             omega_best = local_omegas[i_best]
             vline!(p, [omega_best], linestyle=:dash, color=:black, label="best ω=$(round(omega_best; digits=3))")
