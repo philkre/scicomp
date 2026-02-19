@@ -10,6 +10,7 @@ dependencies = [
     "FFMPEG",
     "JLD2",
     "SpecialFunctions",
+    "Printf",
     "LaTeXStrings"
 ]
 

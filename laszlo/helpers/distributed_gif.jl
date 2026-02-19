@@ -5,8 +5,8 @@ using Distributed
 end
 using FFMPEG
 
-function gif_slow(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String)
 
+function gif_slow(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String; fps::Int64=30)
     # Animate the solution and save frames
     default(legend=false)
 
@@ -14,8 +14,9 @@ function gif_slow(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String)
     for p in plots
         frame(anim, p)
     end
-    gif(anim, gifname, fps=30)
+    gif(anim, gifname, fps=fps)
 end
+
 
 function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String; fps::Int64=30, do_palette=false, width=600)
     # Create a temporary directory to store frames
