@@ -1,12 +1,9 @@
 module Assignment_1_2
 
-# Preperare distributed
-using Distributed
-
 # Benchmarking
 include("helpers/benchmark.jl")
 
-# Wave equation helpers
+# Diffusion helpers
 include("helpers/diffusion.jl")
 
 # Utilities
@@ -16,25 +13,9 @@ using Printf
 # Plotting
 using Plots
 include("helpers/distributed_gif.jl")
+include("helpers/heatmap_kwargs.jl")
 
 
-# Plotting parameters
-get_heatmap_ticks = (N::Int64, L::Float64) -> (1:N/4:N+1, 0:L/4:L)
-get_heatmap_lims = (N::Int64) -> (1, N + 1)
-get_heatmap_kwargs = (N::Int64, L::Float64) -> Dict(
-    :aspect_ratio => 1,
-    :xlabel => "x",
-    :ylabel => "y",
-    :xticks => get_heatmap_ticks(N, L),
-    :yticks => get_heatmap_ticks(N, L),
-    :xlims => get_heatmap_lims(N),
-    :ylims => get_heatmap_lims(N),
-    :dpi => 150,
-    :legend => true,
-)
-
-
-analytical_sol = (t::Float64, D::Float64, L::Float64, N::Int64) -> [c_anal(x, t, D) for x in LinRange(0, L, N)]
 
 
 function get_c_intervals(c0::Matrix{Float64}, intervals::Vector{Float64}; L::Float64, N::Int64, D::Float64, dt::Float64, t_0::Float64=0.0)::Vector{Matrix{Float64}}
@@ -53,7 +34,7 @@ end
 
 function plot_intervals(c0::Matrix, intervals::Vector{Float64}, results::Vector{Matrix{Float64}}; L::Float64, N::Int64, t_0::Float64=0.0)
     # Plot concentration along y-axis at x=0 for all time intervals
-    plot(c0[1, :], title="Concentration along y-axis", xlabel="y", ylabel="Concentration", label="t = $(t_0)", legend=true, xticks=get_heatmap_ticks(N, L), xlims=get_heatmap_lims(N), dpi=150)
+    plot(c0[1, :], title="Concentration along y-axis", xlabel="y", ylabel="Concentration", label="t = $(t_0)", legend=true, xticks=get_heatmap_ticks(N, L), xlims=get_heatmap_lims(N), dpi=300)
     for (t_end, c) in zip(intervals, results)
         plot!(c[1, :], label="t = $(t_end) (numerical)")
     end
@@ -79,7 +60,7 @@ function plot_heatmaps(intervals::Vector{Float64}, results::Vector{Matrix{Float6
     for (t_end, c) in zip(intervals, results)
         push!(plots, heatmap(c'; title="t = $(t_end)", heatmap_kwargs...))
     end
-    plot(plots..., layout=(2, 2), size=(800, 800), dpi=150, suptitle="Diffusion process at different time points")
+    plot(plots..., layout=(2, 2), size=(800, 800), dpi=300, suptitle="Diffusion process at different time points")
     savefig("plots/diffusion_heatmaps.png")
 end
 

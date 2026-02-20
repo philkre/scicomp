@@ -344,6 +344,8 @@ function c_anal(x::Float64, t::Float64, D::Float64; i_max::Int=100)::Float64
     end
 end
 
+analytical_sol = (t::Float64, D::Float64, L::Float64, N::Int64) -> [c_anal(x, t, D) for x in LinRange(0, L, N)]
+
 
 """
     delta(c_old::Matrix{Float64}, c_new::Matrix{Float64})
@@ -381,7 +383,7 @@ end
 
 
 """
-    solve_until_tol(solver::Function, c_initial::Matrix{Float64}, tol::Float64, max_iters::Int, kwargs...; quiet::Bool=false)
+    solve_until_tol(solver::Function, c_initial::Matrix{Float64}, tol::Float64, max_iters::Int, kwargs...; quiet::Bool=false)::Tuple{Matrix{Float64},Vector{Float64}}
 
 Solve the diffusion equation iteratively until convergence or maximum iterations.
 
@@ -396,10 +398,7 @@ Solve the diffusion equation iteratively until convergence or maximum iterations
 # Returns
 - `Tuple{Matrix{Float64}, Vector{Float64}}`: Final concentration field and convergence history
 """
-function solve_until_tol(solver::Function, c_initial::Matrix{Float64}, tol::Float64, max_iters::Int, args_solver...; quiet::Bool=false, kwargs_solver...)
-    # print("Solving with $solver... \n")
-    # print(kwargs_solver...)
-
+function solve_until_tol(solver::Function, c_initial::Matrix{Float64}, tol::Float64, max_iters::Int, args_solver...; quiet::Bool=false, kwargs_solver...)::Tuple{Matrix{Float64},Vector{Float64}}
     c_old = copy(c_initial)
     c_new = copy(c_initial)
 

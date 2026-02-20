@@ -24,14 +24,14 @@ function get_wave_plots(t_f::Float64, t_0::Float64, dt::Float64, L::Float64, N::
     i_total = Int((t_f - t_0) / dt)
     plots = @distributed (vcat) for i in 1:i_total
         # create a plot with 3 subplots and a custom layout
-        plot(x, solution_1[:, i], ylim=(-1, 1), title="Time: $(round(i*dt, digits=2)) s", xlabel="Position along string", ylabel="Displacement", dpi=150)
+        plot(x, solution_1[:, i], ylim=(-1, 1), title="Time: $(round(i*dt, digits=2)) s", xlabel="Position along string", ylabel="Displacement", dpi=300)
         plot!(x, solution_2[:, i])
         plot!(x, solution_3[:, i])
     end
     return plots
 end
 
-function main(; do_bench::Bool=true)
+function main(; do_bench::Bool=false)
     if do_bench
         @info "Running benchmarks..."
 

@@ -32,6 +32,7 @@ JuliaLocalPreferences.toml
 *.h5
 *.png
 *.mp4
+*.gif
 *.jld
 *.jld2
 
