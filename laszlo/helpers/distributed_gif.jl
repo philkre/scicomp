@@ -95,5 +95,10 @@ function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::St
     # Clean up temporary files
     rm(tmp_dirname; recursive=true)
 
-    display("text/html", "<img src='$(gifname)'>")
+    # Detect if we are running in a Jupyter notebook and display the GIF
+    if Base.invokelatest(isdefined, Main, :IJulia) && Main.IJulia.inited
+        display("image/png", read(gifname))
+    else
+        println("GIF created successfully: $gifname")
+    end
 end

@@ -1,10 +1,9 @@
-using SharedArrays
 using Distributed
+@everywhere using SharedArrays
 @everywhere using LoopVectorization
 
-
 """
-    wave_equation(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)
+    wave_equation(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)::Vector{Float64}
 
 Compute the second time derivative of the wave function using the wave equation.
 
@@ -21,7 +20,7 @@ Compute the second time derivative of the wave function using the wave equation.
 Basic implementation using array slicing. Applies finite difference approximation
 for the spatial second derivative.
 """
-function wave_equation(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)
+function wave_equation(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)::Vector{Float64}
     # Starts from second point to second last point
     d2psi_dt2 = c^2 * (psi[1:end-2] - 2 * psi[2:end-1] + psi[3:end]) / (L / N)^2
     return d2psi_dt2
@@ -29,7 +28,7 @@ end
 
 
 """
-    wave_equation_inb(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)
+    wave_equation_inb(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)::Vector{Float64}
 
 Compute the second time derivative with @inbounds optimization.
 
@@ -45,7 +44,7 @@ Compute the second time derivative with @inbounds optimization.
 # Notes
 Uses explicit loop with @inbounds for improved performance by skipping bounds checking.
 """
-function wave_equation_inb(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)
+function wave_equation_inb(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)::Vector{Float64}
     dx2_inv = (N / L)^2
     c2 = c^2
     d2psi_dt2 = similar(psi, length(psi) - 2)
@@ -57,7 +56,7 @@ end
 
 
 """
-    wave_equation_vec(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)
+    wave_equation_vec(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)::Vector{Float64}
 
 Compute the second time derivative using vectorized operations.
 
@@ -73,14 +72,14 @@ Compute the second time derivative using vectorized operations.
 # Notes
 Uses @views and broadcast operations for efficient vectorized computation.
 """
-function wave_equation_vec(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)
+function wave_equation_vec(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)::Vector{Float64}
     dx2_inv = (N / L)^2
     c2 = c^2
     @views @. c2 * (psi[1:end-2] - 2 * psi[2:end-1] + psi[3:end]) * dx2_inv
 end
 
 """
-    wave_equation_dist(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)
+    wave_equation_dist(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)::Vector{Float64}
 
 Compute the second time derivative using distributed computing.
 
@@ -96,7 +95,7 @@ Compute the second time derivative using distributed computing.
 # Notes
 Uses SharedArray and @distributed for parallel computation across workers.
 """
-function wave_equation_dist(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)
+function wave_equation_dist(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)::Vector{Float64}
     n = length(psi) - 2
     d2psi_dt2 = SharedArray{Float64}(n)
 
@@ -109,7 +108,7 @@ end
 
 
 """
-    wave_equation_simd(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)
+    wave_equation_simd(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)::Vector{Float64}
 
 Compute the second time derivative using SIMD optimization.
 
@@ -125,7 +124,7 @@ Compute the second time derivative using SIMD optimization.
 # Notes
 Uses @simd for single instruction, multiple data vectorization.
 """
-function wave_equation_simd(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)
+function wave_equation_simd(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)::Vector{Float64}
     n = length(psi) - 2
     d2psi_dt2 = Vector{Float64}(undef, n)
     dx2_inv = (N / L)^2
@@ -139,7 +138,7 @@ end
 
 
 """
-    wave_equation_avx(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)
+    wave_equation_avx(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)::Vector{Float64}
 
 Compute the second time derivative using AVX vectorization.
 
@@ -155,7 +154,7 @@ Compute the second time derivative using AVX vectorization.
 # Notes
 Uses @turbo from LoopVectorization.jl for advanced SIMD optimization with AVX instructions.
 """
-function wave_equation_avx(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)
+function wave_equation_avx(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)::Vector{Float64}
     n = length(psi) - 2
     d2psi_dt2 = Vector{Float64}(undef, n)
     dx2_inv = (N / L)^2
@@ -169,7 +168,7 @@ end
 
 
 """
-    wave_equation_dist_avx(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)
+    wave_equation_dist_avx(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)::Vector{Float64}
 
 Compute the second time derivative using distributed computing with AVX optimization.
 
@@ -186,7 +185,7 @@ Compute the second time derivative using distributed computing with AVX optimiza
 Combines distributed computing with @turbo AVX vectorization for maximum performance.
 Work is divided among available workers with each using SIMD instructions.
 """
-function wave_equation_dist_avx(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)
+function wave_equation_dist_avx(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)::Vector{Float64}
     n = length(psi) - 2
     d2psi_dt2 = SharedArray{Float64}(n)
     dx2_inv = (N / L)^2
@@ -210,7 +209,7 @@ end
 
 
 """
-    propagate_psi(psi_0_f::Function; L=1, N=100, c=1, t_0=0, t_f=1, dt=0.01)
+    propagate_psi(psi_0_f::Function; L::Float64=1.0, N::Int=100, c::Float64=1.0, t_0::Float64=0.0, t_f::Float64=1.0, dt::Float64=0.01)::Matrix{Float64}
 
 Propagate the wave equation in time using Euler's method.
 
@@ -232,7 +231,7 @@ Propagate the wave equation in time using Euler's method.
 - Fixed boundary conditions: ψ(0,t) = ψ(L,t) = 0
 - Uses wave_equation_avx for fast spatial derivative computation
 """
-function propagate_psi(psi_0_f::Function; L=1, N=100, c=1, t_0=0, t_f=1, dt=0.01)
+function propagate_psi(psi_0_f::Function; L::Float64=1.0, N::Int=100, c::Float64=1.0, t_0::Float64=0.0, t_f::Float64=1.0, dt::Float64=0.01)::Matrix{Float64}
     # Initial condition at t=0
     psi_x_i = psi_0_f.(range(0, L, length=N))
 
@@ -261,7 +260,7 @@ function propagate_psi(psi_0_f::Function; L=1, N=100, c=1, t_0=0, t_f=1, dt=0.01
 end
 
 """
-    propagate_psi_leapfrog(psi_0_f::Function; L=1, N=100, c=1, t_0=0, t_f=1, dt=0.01)
+    propagate_psi_leapfrog(psi_0_f::Function; L::Float64=1.0, N::Int=100, c::Float64=1.0, t_0::Float64=0.0, t_f::Float64=1.0, dt::Float64=0.01)::Matrix{Float64}
 
 Propagate the wave equation in time using the leapfrog (Verlet) integration method.
 
@@ -284,7 +283,7 @@ Propagate the wave equation in time using the leapfrog (Verlet) integration meth
 - Uses wave_equation_avx for fast spatial derivative computation
 - More stable than Euler's method for wave equations
 """
-function propagate_psi_leapfrog(psi_0_f::Function; L=1, N=100, c=1, t_0=0, t_f=1, dt=0.01)
+function propagate_psi_leapfrog(psi_0_f::Function; L::Float64=1.0, N::Int=100, c::Float64=1.0, t_0::Float64=0.0, t_f::Float64=1.0, dt::Float64=0.01)::Matrix{Float64}
     # Initial condition at t=0
     x_i = psi_0_f.(range(0, L, length=N))
 
