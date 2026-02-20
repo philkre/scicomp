@@ -273,7 +273,7 @@ end
 
 
 """
-    propagate_c_diffusion(c::Matrix, L::Float64, N::Int, D::Float64, t_0::Float64, t_f::Float64, dt::Float64)
+    propagate_c_diffusion(c::Matrix, L::Float64, N::Int, D::Float64, t_0::Float64, t_f::Float64, dt::Float64)::Matrix{Float64}
 
 Propagate the diffusion equation from initial time to final time.
 
@@ -292,7 +292,7 @@ Propagate the diffusion equation from initial time to final time.
 # Throws
 - `ErrorException`: If stability condition D*dt/dx² > 0.25 is violated
 """
-function propagate_c_diffusion(c::Matrix, L::Float64, N::Int, D::Float64, t_0::Float64, t_f::Float64, dt::Float64)
+function propagate_c_diffusion(c::Matrix, L::Float64, N::Int, D::Float64, t_0::Float64, t_f::Float64, dt::Float64)::Matrix{Float64}
     c_curr = copy(c)
     dx = L / N
 
@@ -328,7 +328,7 @@ Analytical solution for the diffusion equation with boundary conditions c(y=0)=0
 Uses a series expansion with complementary error functions. For large `i_max` (> 50,000),
 distributes the computation across available workers.
 """
-function c_anal(x::Float64, t::Float64, D::Float64; i_max::Int=100)
+function c_anal(x::Float64, t::Float64, D::Float64; i_max::Int=100)::Float64
     denom = 2 * sqrt(D * t)
 
     function c_anal_i(x::Float64, i::Int)

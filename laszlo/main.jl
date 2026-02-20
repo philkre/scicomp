@@ -4,6 +4,8 @@ using Distributed
 # Globals
 "Do benchmarking"
 do_bench::Bool = false
+"Use caching for diffusion simulation"
+do_cache::Bool = false
 "Do assignment 1"
 do_ass_1 = false
 "Do assignment 2"
@@ -31,7 +33,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
         # Run the main function
         @info "Running main function for Assignment 1.1..."
-        @time "Assigment 1.1 completed" main_1_1(do_bench=do_bench)
+        @time "Assigment 1.1 completed" main_1_1(; do_bench=do_bench)
     end
 
 
@@ -44,6 +46,6 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
         # Run the main function
         @info "Running main function for Assignment 1.2..."
-        @time "Assigment 1.2 completed" main_1_2(do_bench=do_bench)
+        @time "Assigment 1.2 completed" main_1_2(; do_bench=do_bench, do_cache=do_cache)
     end
 end
