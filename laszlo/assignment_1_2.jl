@@ -9,7 +9,9 @@ include("helpers/benchmark.jl")
 # Wave equation helpers
 include("helpers/diffusion.jl")
 
+# Utilities
 using JLD2
+using Printf
 
 # Plotting
 using Plots
@@ -35,7 +37,7 @@ get_heatmap_kwargs = (N::Int64, L::Float64) -> Dict(
 analytical_sol = (t::Float64, D::Float64, L::Float64, N::Int64) -> [c_anal(x, t, D) for x in LinRange(0, L, N)]
 
 
-function get_c_intervals(c0::Matrix{Float64}, L::Float64, N::Int64, D::Float64, dt::Float64; intervals::Vector{Float64}=[0.001, 0.01, 0.1, 1.0], t_0::Float64=0.0)::Vector{Matrix{Float64}}
+function get_c_intervals(c0::Matrix{Float64}, intervals::Vector{Float64}; L::Float64, N::Int64, D::Float64, dt::Float64, t_0::Float64=0.0)::Vector{Matrix{Float64}}
     c = c0
 
     t_starts = [t_0; intervals[1:end-1]]
@@ -48,7 +50,8 @@ function get_c_intervals(c0::Matrix{Float64}, L::Float64, N::Int64, D::Float64, 
     return results
 end
 
-function plot_intervals(intervals::Vector{Float64}, results::Vector{Matrix{Float64}}; c0::Matrix{Float64}, L::Float64, N::Int64, t_0::Float64,)
+
+function plot_intervals(c0::Matrix, intervals::Vector{Float64}, results::Vector{Matrix{Float64}}; L::Float64, N::Int64, t_0::Float64=0.0)
     # Plot concentration along y-axis at x=0 for all time intervals
     plot(c0[1, :], title="Concentration along y-axis", xlabel="y", ylabel="Concentration", label="t = $(t_0)", legend=true, xticks=get_heatmap_ticks(N, L), xlims=get_heatmap_lims(N), dpi=150)
     for (t_end, c) in zip(intervals, results)
@@ -59,6 +62,7 @@ function plot_intervals(intervals::Vector{Float64}, results::Vector{Matrix{Float
     return current()
 end
 
+
 function add_analytical_plot!(plt::Plots.Plot{Plots.GRBackend}, intervals::Vector{Float64}, analytical_sol::Function; D::Float64, L::Float64, N::Int64)
     for t in intervals
         plot!(plt, analytical_sol(t, D, L, N), label="t = $(t) (analytical)", linestyle=:dash)
@@ -68,6 +72,7 @@ function add_analytical_plot!(plt::Plots.Plot{Plots.GRBackend}, intervals::Vecto
     return current()
 end
 
+
 function plot_heatmaps(intervals::Vector{Float64}, results::Vector{Matrix{Float64}}; L::Float64, N::Int64)
     plots = []
     heatmap_kwargs = get_heatmap_kwargs(N, L)
@@ -76,6 +81,31 @@ function plot_heatmaps(intervals::Vector{Float64}, results::Vector{Matrix{Float6
     end
     plot(plots..., layout=(2, 2), size=(800, 800), dpi=150, suptitle="Diffusion process at different time points")
     savefig("plots/diffusion_heatmaps.png")
+end
+
+
+function animate_diffusion(c_0::Matrix{Float64}; L::Float64, N::Int64, D::Float64, dt::Float64)
+    heatmap_kwargs = get_heatmap_kwargs(N, L)
+
+    plots = (() -> begin
+        frames::Vector{Plots.Plot{Plots.GRBackend}} = []
+        c_i = c_0
+
+        # Use a non-linear time stepping to capture the early evolution better, while still reaching t=1.0 in a reasonable number of steps
+        for i in 0:317
+            t_prev = (i - 1)^2 * 0.00001
+            t = (i)^2 * 0.00001
+            if t >= 1.0
+                break
+            end
+
+            c_i = propagate_c_diffusion(c_i, L, N, D, t_prev, t, dt)
+            push!(frames, plot(heatmap(c_i', title=@sprintf("t = %0.3f", t); heatmap_kwargs...)))
+        end
+        frames
+    end)()
+
+    gif_slow(plots, "plots/diffusion_evolution.gif", fps=30)
 end
 
 
@@ -108,9 +138,7 @@ function main(; do_bench::Bool=false, do_cache::Bool=false)
         @load "diffusion_results.jld2" results
     else
         @info "Running diffusion simulation and plotting y-profile results..."
-        @time "Ran diffusion simulations" results = get_c_intervals(c_0, L, N, D, dt;
-            intervals=t_intervals, t_0
-            =t_0)
+        @time "Ran diffusion simulations" results = get_c_intervals(c_0, t_intervals; L=L, N=N, D=D, dt=dt, t_0=t_0)
 
         if do_cache
             @save "diffusion_results.jld2" results
@@ -119,11 +147,16 @@ function main(; do_bench::Bool=false, do_cache::Bool=false)
 
     # Plot y-profile
     @info "Plotting y-profile results..."
-    plt_intervals = plot_intervals(t_intervals, results; c0=c_0, L=L, N=N, t_0=t_0)
+    plt_intervals = plot_intervals(c_0, t_intervals, results; L=L, N=N, t_0=t_0)
     add_analytical_plot!(plt_intervals, t_intervals, analytical_sol; D=D, L=L, N=N)
 
     # Plot heatmaps for each interval
+    @info "Plotting heatmaps for each interval..."
     plot_heatmaps(t_intervals, results; L=L, N=N)
+
+    # Animate diffusion process
+    @info "Animating diffusion process..."
+    @time "Saved animated diffusion process" animate_diffusion(c_0; L=L, N=N, D=D, dt=dt)
 end
 
 end
