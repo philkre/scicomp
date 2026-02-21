@@ -7,6 +7,18 @@ import ..DataIO: write_out!
 
 export run_wave, run_wave_1b, run_diffusion, run_steadystate, optimise_omega, sink_builder
 
+function _wave_total_energy(
+    psi::AbstractVector{<:Real},
+    v::AbstractVector{<:Real},
+    c::Real,
+    dx::Real,
+)::Float64
+    strain = diff(psi) ./ dx
+    kinetic = 0.5 * dx * sum(abs2, v)
+    potential = 0.5 * c^2 * dx * sum(abs2, strain)
+    return kinetic + potential
+end
+
 function sink_builder(
     N::Int;
     fraction::Float64=0.2,
@@ -71,6 +83,7 @@ function run_wave(
     dt::Real,
     n_steps::Integer;
     method::String="euler",
+    track_energy::Bool=false,
     timing::Bool=false,
 )
     """
@@ -81,6 +94,7 @@ function run_wave(
     v = zeros(n)
     a = zeros(n)
     psis = zeros(n, n_steps)
+    energies = track_energy ? zeros(n_steps) : nothing
 
     elapsed = @elapsed begin
         @inbounds for step in 1:n_steps
@@ -92,6 +106,9 @@ function run_wave(
                 error("Unknown method '$method'. Use 'euler' or 'leapfrog'.")
             end
             psis[:, step] .= psi
+            if track_energy
+                energies[step] = _wave_total_energy(psi, v, c, dx)
+            end
         end
     end
 
@@ -99,10 +116,21 @@ function run_wave(
         println("run_wave($method) completed in $(round(elapsed; digits=6)) s")
     end
 
+    if track_energy
+        return (psis=psis, energies=energies)
+    end
     return psis
 end
 
-function run_wave_1b(c::Real, dx::Real, dt::Real, n_steps::Integer, L::Real; method::String="euler")
+function run_wave_1b(
+    c::Real,
+    dx::Real,
+    dt::Real,
+    n_steps::Integer,
+    L::Real;
+    method::String="euler",
+    track_energy::Bool=false,
+)
     """
     Runs the 1D wave simulation for the three assignment initial conditions.
     """
@@ -111,11 +139,17 @@ function run_wave_1b(c::Real, dx::Real, dt::Real, n_steps::Integer, L::Real; met
     psi_ii = [sin(5 * pi * xi) for xi in x]
     psi_iii = [(xi < 2 / 5 && xi > 1 / 5) ? sin(10 * pi * xi) : 0.0 for xi in x]
 
-    psis_i = run_wave(psi_i, c, dx, dt, n_steps; method=method)
-    psis_ii = run_wave(psi_ii, c, dx, dt, n_steps; method=method)
-    psis_iii = run_wave(psi_iii, c, dx, dt, n_steps; method=method)
+    run_i = run_wave(psi_i, c, dx, dt, n_steps; method=method, track_energy=track_energy)
+    run_ii = run_wave(psi_ii, c, dx, dt, n_steps; method=method, track_energy=track_energy)
+    run_iii = run_wave(psi_iii, c, dx, dt, n_steps; method=method, track_energy=track_energy)
 
-    return [psis_i, psis_ii, psis_iii]
+    if track_energy
+        return (
+            psiss=[run_i.psis, run_ii.psis, run_iii.psis],
+            energies=[run_i.energies, run_ii.energies, run_iii.energies],
+        )
+    end
+    return [run_i, run_ii, run_iii]
 end
 
 function run_diffusion(

@@ -28,7 +28,7 @@ function gif_slow(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String; f
     for p in plots
         frame(anim, p)
     end
-    gif(anim, gifname, fps=fps)
+    gif(anim, gifname, fps=fps, dpi=300)
 end
 
 

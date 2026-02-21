@@ -10,8 +10,9 @@ include("data.jl")
 include("sim.jl")
 include("plot.jl")
 
+
 using .Sim: run_diffusion, run_wave, run_wave_1b, run_steadystate, optimise_omega, sink_builder
-using .Plotting: plot_animation, plot_profiles, plot_2d_concentration, plot_wave_final, animate_wave_all, plot_steadystate, plot_concentration_profiles_steady, plot_convergence_its, plot_omega_optimisation, plot_omega_sweep_panels
+using .Plotting: plot_animation, plot_profiles, plot_2d_concentration, plot_wave_final, animate_wave_all, plot_steadystate, plot_concentration_profiles_steady, plot_convergence_its, plot_omega_optimisation, plot_omega_sweep_panels, plot_wave_multi_t, plot_euler_leapfrog_energy
 
 
 
@@ -26,14 +27,40 @@ function main_wave()
     x = 0:dx:L
 
     # Euler
-    # psiss = run_wave_1b(c, dx, dt, n_steps, L; method="euler")
-    # plot_wave_final(psiss, x, "1D wave equation: different initial conditions"; output="figure_1A.png")
-    # animate_wave_all(psiss, x; fps=1200, filename="animation_1C.mp4")
+    psiss = run_wave_1b(c, dx, dt, n_steps, L; method="euler")
+    #plot_wave_final(psiss, x, "1D wave equation: different initial conditions"; output="figure_1A.png")
+    ts = [0.0, 0.1, 0.3, 0.8, 1.0, 2.0]
+    nt = size(psiss[1], 2)
+    # Timepoint indices are 1-based in Julia and clamped to available output columns.
+    tp_indices = [clamp(Int(floor(t / dt)), 1, nt) for t in ts]
+    print(tp_indices)
+    for (i, psis) in enumerate(psiss)
+        plot_wave_multi_t(psis, x, "", tp_indices; output="figure_1B_ic$(i).png")
+    end
+
 
     # Leapfrog
     psiss_leapfrog = run_wave_1b(c, dx, dt, n_steps, L; method="leapfrog")
-    plot_wave_final(psiss_leapfrog, x, "1D wave equation: leapfrog method"; output="output/img/figure_1A.png")
-    animate_wave_all(psiss_leapfrog, x; fps=1200, filename="output/img/animation_1C_leapfrog.mp4")
+
+    # compare condition three for leapfrog and euler
+    psi_string = [(xi < 2 / 5 && xi > 1 / 5) ? sin(10 * pi * xi) : 0.0 for xi in x]
+    run_euler_energy = run_wave(psi_string, c, dx, dt, n_steps; method="euler", track_energy=true)
+    run_leapfrog_energy = run_wave(psi_string, c, dx, dt, n_steps; method="leapfrog", track_energy=true)
+
+    # initial energy
+    strain0 = diff(psi_string) ./ dx
+    e0 = 0.5 * c^2 * dx * sum(abs2, strain0)
+
+    # diff energy
+    energy_euler_shifted = vcat(0.0, run_euler_energy.energies .- e0)
+    energy_leapfrog_shifted = vcat(0.0, run_leapfrog_energy.energies .- e0)
+    tvals = (0:n_steps) .* dt
+
+    # plot
+    plot_euler_leapfrog_energy(tvals, energy_euler_shifted, energy_leapfrog_shifted; output="figure_1C_energy.png")
+
+    #plot_wave_final(psiss_leapfrog, x, "1D wave equation: leapfrog method"; output="output/img/figure_1A.png")
+    # animate_wave_all(psiss_leapfrog, x; fps=1200, filename="output/img/animation_1C_leapfrog.mp4")
 
     return nothing
 end
@@ -201,7 +228,8 @@ function main_steadystate()
 end
 
 function main()
-    main_steadystate()
+    #main_steadystate()
+    main_wave()
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

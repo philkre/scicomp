@@ -4,13 +4,12 @@ using Plots
 using LinearAlgebra
 using Statistics
 using FileIO
-
-default(fontfamily="Computer Modern")
+using LaTeXStrings
 
 import ..Model: analytical_profile_series
 import ..DataIO: load_output
 
-export plot_animation, plot_profiles, plot_2d_concentration, plot_wave_final, animate_wave_all, plot_steadystate, plot_concentration_profiles_steady, plot_convergence_its, plot_omega_optimisation, plot_omega_sweep_panels
+export plot_animation, plot_profiles, plot_2d_concentration, plot_wave_final, animate_wave_all, plot_steadystate, plot_concentration_profiles_steady, plot_convergence_its, plot_omega_optimisation, plot_omega_sweep_panels, plot_wave_multi_t, plot_euler_leapfrog_energy
 
 function _sink_mask(
     dims::Tuple{Int,Int},
@@ -267,6 +266,7 @@ function plot_wave_final(
     psiss::Vector{<:AbstractMatrix},
     x::AbstractVector{<:Real},
     title_text::String;
+    ts=nothing,
     output::String="output/img/figure_1A.png",
 )
     """
@@ -283,6 +283,33 @@ function plot_wave_final(
     savefig(p, output)
     return nothing
 end
+
+function plot_wave_multi_t(
+    psis::AbstractMatrix,
+    x::AbstractVector{<:Real},
+    title_text::String,
+    ts_idx;
+    output::String="output/img/figure_1A.png",
+)
+    p = plot(dpi=300, size=(400, 400))
+    for t in ts_idx
+        if t == 1
+            t_label = "t=0.0"
+        else
+            t_label = "t=$(floor(t * 0.001; digits=3))"
+        end
+        plot!(p, x, psis[:, t], label=t_label)
+    end
+
+    xlabel!(p, "x")
+    ylabel!(p, "Psi")
+    title!(p, title_text)
+    mkpath(dirname(output))
+    savefig(p, output)
+    return nothing
+end
+
+
 
 function animate_wave_all(
     psiss::Vector{<:AbstractMatrix},
@@ -706,6 +733,26 @@ function plot_omega_sweep_panels(
 
     mkpath(dirname(output))
     savefig(p, output)
+end
+
+function plot_euler_leapfrog_energy(tvals, energy_euler, energy_leapfrog; size=(400, 400), output="output/img/figure_1D_energy_euler_vs_leapfrog.png")
+
+    p_energy = plot(
+        tvals,
+        energy_euler,
+        label="Euler",
+        xlabel="\\t",
+        ylabel=L"$\delta E(t) = E(t) - E(0)$",
+        title="",
+        dpi=300,
+        size=size,
+        color=:blue
+    )
+    plot!(p_energy, tvals, fill(mean(energy_euler), length(tvals)), linestyle=:dash, color=:blue, label="Euler mean")
+    plot!(p_energy, tvals, energy_leapfrog, label="Leapfrog", color=:red)
+    mkpath(dirname(output))
+    savefig(p_energy, output)
+
 end
 
 end

@@ -209,7 +209,7 @@ end
 
 
 """
-    propagate_psi(psi_0_f::Function; L::Float64=1.0, N::Int=100, c::Float64=1.0, t_0::Float64=0.0, t_f::Float64=1.0, dt::Float64=0.01)::Matrix{Float64}
+    propagate_psi(psi_0_f::Function; L::Float64=1.0, N::Int=100, c::Float64=1.0, t_0::Float64=0.0, t_f::Float64=1.0, dt::Float64=0.01, return_velocity::Bool=false)
 
 Propagate the wave equation in time using Euler's method.
 
@@ -221,9 +221,11 @@ Propagate the wave equation in time using Euler's method.
 - `t_0`: Initial time (default: 0)
 - `t_f`: Final time (default: 1)
 - `dt`: Time step size (default: 0.01)
+- `return_velocity`: If true, also return velocity history as a matrix (default: false)
 
 # Returns
-- `Matrix{Float64}`: Wave function values ψ(x,t) at all spatial points and time steps (N × n_steps)
+- If `return_velocity == false`: `Matrix{Float64}` with ψ(x,t), shape (N × n_steps)
+- If `return_velocity == true`: named tuple `(psis=..., vs=...)`, both shape (N × n_steps)
 
 # Notes
 - Uses Euler's method for time integration
@@ -231,7 +233,7 @@ Propagate the wave equation in time using Euler's method.
 - Fixed boundary conditions: ψ(0,t) = ψ(L,t) = 0
 - Uses wave_equation_avx for fast spatial derivative computation
 """
-function propagate_psi(psi_0_f::Function; L::Float64=1.0, N::Int=100, c::Float64=1.0, t_0::Float64=0.0, t_f::Float64=1.0, dt::Float64=0.01)::Matrix{Float64}
+function propagate_psi(psi_0_f::Function; L::Float64=1.0, N::Int=100, c::Float64=1.0, t_0::Float64=0.0, t_f::Float64=1.0, dt::Float64=0.01, return_velocity::Bool=false)
     # Initial condition at t=0
     psi_x_i = psi_0_f.(range(0, L, length=N))
 
@@ -247,6 +249,7 @@ function propagate_psi(psi_0_f::Function; L::Float64=1.0, N::Int=100, c::Float64
     n_steps = Int((t_f - t_0) / dt)
     psi_x_t = zeros(N, n_steps)
     psi_x_t[:, 1] = psi_x_i
+    v_x_t = return_velocity ? zeros(N, n_steps) : nothing
 
     # Time propagation using finite difference method
     for n in 1:n_steps-1
@@ -254,13 +257,19 @@ function propagate_psi(psi_0_f::Function; L::Float64=1.0, N::Int=100, c::Float64
         # Use Euler's method to update psi and its time derivative
         dpsi_dt_i += d2psi_dt2 * dt
         psi_x_t[2:end-1, n+1] = psi_x_t[2:end-1, n] + dpsi_dt_i * dt
+        if return_velocity
+            v_x_t[2:end-1, n+1] = dpsi_dt_i
+        end
     end
 
+    if return_velocity
+        return (psis=psi_x_t, vs=v_x_t)
+    end
     return psi_x_t
 end
 
 """
-    propagate_psi_leapfrog(psi_0_f::Function; L::Float64=1.0, N::Int=100, c::Float64=1.0, t_0::Float64=0.0, t_f::Float64=1.0, dt::Float64=0.01)::Matrix{Float64}
+    propagate_psi_leapfrog(psi_0_f::Function; L::Float64=1.0, N::Int=100, c::Float64=1.0, t_0::Float64=0.0, t_f::Float64=1.0, dt::Float64=0.01, return_velocity::Bool=false)
 
 Propagate the wave equation in time using the leapfrog (Verlet) integration method.
 
@@ -272,9 +281,11 @@ Propagate the wave equation in time using the leapfrog (Verlet) integration meth
 - `t_0`: Initial time (default: 0)
 - `t_f`: Final time (default: 1)
 - `dt`: Time step size (default: 0.01)
+- `return_velocity`: If true, also return velocity history as a matrix (default: false)
 
 # Returns
-- `Matrix{Float64}`: Wave function values ψ(x,t) at all spatial points and time steps (N × n_steps)
+- If `return_velocity == false`: `Matrix{Float64}` with ψ(x,t), shape (N × n_steps)
+- If `return_velocity == true`: named tuple `(psis=..., vs=...)`, both shape (N × n_steps)
 
 # Notes
 - Uses leapfrog (Verlet) integration for improved accuracy and energy conservation
@@ -283,7 +294,7 @@ Propagate the wave equation in time using the leapfrog (Verlet) integration meth
 - Uses wave_equation_avx for fast spatial derivative computation
 - More stable than Euler's method for wave equations
 """
-function propagate_psi_leapfrog(psi_0_f::Function; L::Float64=1.0, N::Int=100, c::Float64=1.0, t_0::Float64=0.0, t_f::Float64=1.0, dt::Float64=0.01)::Matrix{Float64}
+function propagate_psi_leapfrog(psi_0_f::Function; L::Float64=1.0, N::Int=100, c::Float64=1.0, t_0::Float64=0.0, t_f::Float64=1.0, dt::Float64=0.01, return_velocity::Bool=false)
     # Initial condition at t=0
     x_i = psi_0_f.(range(0, L, length=N))
 
@@ -298,6 +309,7 @@ function propagate_psi_leapfrog(psi_0_f::Function; L::Float64=1.0, N::Int=100, c
     # Initialize the array to store the results
     psi_x_t = zeros(N, Int((t_f - t_0) / dt))
     psi_x_t[:, 1] = x_i
+    v_x_t = return_velocity ? zeros(N, size(psi_x_t, 2)) : nothing
 
     # Time propagation using finite difference method
     for n in 1:size(psi_x_t, 2)-1
@@ -316,13 +328,69 @@ function propagate_psi_leapfrog(psi_0_f::Function; L::Float64=1.0, N::Int=100, c
 
         # Next time step for velocity
         v_i_slice += 0.5 * (a_i + a_i_next) * dt
+        if return_velocity
+            v_x_t[2:end-1, n+1] = v_i_slice
+        end
 
         # Shift current position to next for the next iteration
         x_i = x_i_next
 
     end
 
+    if return_velocity
+        return (psis=psi_x_t, vs=v_x_t)
+    end
     return psi_x_t
 end
 
 
+"""
+    energy_shifted_from_solution(psis::Matrix{Float64}; c::Float64, L::Float64, dt::Float64, vs::Union{Nothing,Matrix{Float64}}=nothing)::Vector{Float64}
+
+Compute the energy of a wave solution at each time step, shifted to be relative to the initial energy.
+
+# Arguments
+- `psis`: Matrix of wave function values ψ(x,t) at all spatial points and time steps (N × n_steps)
+- `c`: Wave speed
+- `L`: Domain length
+- `dt`: Time step size
+- `vs`: Optional velocity matrix v(x,t), same size as `psis`
+
+# Returns
+- `Vector{Float64}`: Energies at each time step, shifted to be relative to the initial energy
+
+# Notes
+- Computes kinetic and potential energies at each time step
+- Returns energies relative to the initial energy (i.e., subtracts the initial energy)
+"""
+function energy_shifted_from_solution(psis::Matrix{Float64}; c::Float64, L::Float64, dt::Float64, vs::Union{Nothing,Matrix{Float64}}=nothing)::Vector{Float64}
+    n_space, n_time = size(psis)
+    # Keep spacing consistent with wave_equation_* and run_wave in main/sim.
+    dx = L / n_space
+    shifted = zeros(n_time)
+    v = zeros(n_space)
+    if !isnothing(vs) && size(vs) != size(psis)
+        error("vs must have same size as psis, got size(vs)=$(size(vs)) and size(psis)=$(size(psis))")
+    end
+
+    # Exact same baseline as main.jl: e0 from initial profile and zero initial velocity.
+    strain0 = diff(psis[:, 1]) ./ dx
+    e0 = 0.5 * c^2 * dx * sum(abs2, strain0)
+    shifted[1] = 0.0
+
+    @inbounds for n in 2:n_time
+        if isnothing(vs)
+            v[2:end-1] .= (psis[2:end-1, n] - psis[2:end-1, n-1]) / dt
+        else
+            v[2:end-1] .= vs[2:end-1, n]
+        end
+        v[1] = 0.0
+        v[end] = 0.0
+
+        strain = diff(psis[:, n]) ./ dx
+        kinetic = 0.5 * dx * sum(abs2, v)
+        potential = 0.5 * c^2 * dx * sum(abs2, strain)
+        shifted[n] = (kinetic + potential) - e0
+    end
+    return shifted
+end
