@@ -96,6 +96,4 @@ function main(; do_bench::Bool=false)
     plot_euler_leapfrog_energy(tvals, energy_euler_shifted, energy_leapfrog_shifted; output="plots/ex_1_energy_euler_vs_leapfrog.png")
 end
 
-main()
-
 end

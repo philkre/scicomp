@@ -6,9 +6,9 @@ do_bench::Bool = false
 "Use caching for diffusion simulation"
 do_cache::Bool = false
 "Do assignment 1"
-do_ass_1 = true
+do_ass_1 = false
 "Do assignment 2"
-do_ass_2 = true
+do_ass_2 = false
 "Do assignment 6"
 do_ass_6 = true
 

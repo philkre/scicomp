@@ -9,10 +9,120 @@ include("helpers/diffusion.jl")
 # Utilities
 using LaTeXStrings
 using ProgressMeter
+using FileIO
+using Statistics
 
 # Plotting
 include("helpers/heatmap_kwargs.jl")
 using Plots
+
+function _resolve_output_path(output::String)::String
+    if isabspath(output)
+        return output
+    end
+    return normpath(joinpath(@__DIR__, output))
+end
+
+function _savefig(output::String)
+    output_path = _resolve_output_path(output)
+    mkpath(dirname(output_path))
+    if isfile(output_path)
+        rm(output_path; force=true)
+    end
+    savefig(output_path)
+    isfile(output_path) || error("Failed to save plot to $output_path")
+    return output_path
+end
+
+function _savefig(p, output::String)
+    output_path = _resolve_output_path(output)
+    mkpath(dirname(output_path))
+    if isfile(output_path)
+        rm(output_path; force=true)
+    end
+    savefig(p, output_path)
+    isfile(output_path) || error("Failed to save plot to $output_path")
+    return output_path
+end
+
+function _overlay_image!(
+    p,
+    x::AbstractVector{<:Real},
+    y::AbstractVector{<:Real},
+    sink_mask::AbstractMatrix{Bool};
+    subplot_idx::Int=1,
+    image_path::String="input/sink",
+    scale::Float64=0.55,
+)
+    candidates = splitext(image_path)[2] == "" ? [image_path * ".png", image_path] : [image_path]
+    resolved_path = ""
+    for cand in candidates
+        path = isabspath(cand) ? cand : normpath(joinpath(@__DIR__, cand))
+        if isfile(path)
+            resolved_path = path
+            break
+        end
+    end
+    if isempty(resolved_path)
+        @warn "Failed to locate sink image, skipping sink overlay." image_path
+        return nothing
+    end
+
+    img = try
+        load(resolved_path)
+    catch err
+        @warn "Failed to load sink image, skipping sink overlay." resolved_path exception = (err, catch_backtrace())
+        return nothing
+    end
+    img2d = ndims(img) == 2 ? img : img[:, :, 1]
+
+    # Crop to non-background content so the sink is visible at subplot scale.
+    alpha_mask = trues(size(img2d))
+    if eltype(img2d) <: Colorant
+        alpha_mask = [alpha(px) > 0.02 for px in img2d]
+        # Fallback for files with opaque black background: keep bright pixels.
+        if !any(alpha_mask)
+            alpha_mask = [red(px) + green(px) + blue(px) > 0.05 for px in img2d]
+        end
+    else
+        alpha_mask = img2d .> 0.02
+    end
+
+    if any(alpha_mask)
+        rows = findall(vec(any(alpha_mask, dims=2)))
+        cols = findall(vec(any(alpha_mask, dims=1)))
+        img2d = img2d[minimum(rows):maximum(rows), minimum(cols):maximum(cols)]
+    end
+
+    sink_idxs = findall(sink_mask)
+    if isempty(sink_idxs)
+        return nothing
+    end
+
+    # Center image on mask centroid.
+    xs = [x[I[1]] for I in sink_idxs]
+    ys = [y[I[2]] for I in sink_idxs]
+    cx = mean(xs)
+    cy = mean(ys)
+    # Use fixed image size in axis units to keep overlays consistent across mask shapes.
+    xr = maximum(x) - minimum(x)
+    yr = maximum(y) - minimum(y)
+    hx = max(eps(Float64), 0.5 * xr * scale)
+    hy = max(eps(Float64), 0.5 * yr * scale)
+
+    # plot image
+    plot!(
+        p,
+        [cx - hx, cx + hx],
+        [cy - hy, cy + hy],
+        img2d;
+        subplot=subplot_idx,
+        seriestype=:image,
+        yflip=false,
+        label=false,
+    )
+    return nothing
+end
 
 
 function solution_at_k(solver::Function, k::Int64, c::Matrix{Float64}, args...; kwargs...)
@@ -31,7 +141,7 @@ function plot_solutions_at_k(solvers::Vector{Function}, labels::Vector{String}, 
         plot!(c[1, :], label=label)
     end
 
-    savefig("plots/diffusion_y_axis_k_$k.png")
+    _savefig("plots/diffusion_y_axis_k_$k.png")
 end
 
 
@@ -45,7 +155,7 @@ function plot_error_at_convergence(solvers::Vector{Function}, labels::Vector{Str
         plot!(abs.(c[1, :] .- anal), label=label)
     end
 
-    savefig("plots/diffusion_error_y_axis.png")
+    _savefig("plots/diffusion_error_y_axis.png")
 end
 
 
@@ -118,7 +228,7 @@ function plot_deltas_equal_iterations(c_0::Matrix{Float64}; tol::Float64=1e-6, o
 
     hline!([tol], linestyle=:dot, label=L"\delta = %$tol")
 
-    savefig("plots/diffusion_deltas_equal_iterations.png")
+    _savefig("plots/diffusion_deltas_equal_iterations.png")
 end
 
 
@@ -135,14 +245,16 @@ function plot_optimal_omega(c_0::Matrix{Float64}; tol::Float64=1e-6, omegas_stag
     optimal_omega = omegas[findfirst(==(k_min), k_converge)]
 
     vline!(plot_omega, [optimal_omega], linestyle=:dot, label=L"\omega_{opt} = %$optimal_omega")
-    savefig("plots/sor_optimal_omega.png")
+    _savefig("plots/sor_optimal_omega.png")
 end
 
 
 function get_masks(N::Int64)::Tuple{Vector{Matrix{Bool}},Vector{String}}
+    # mask square
     mask_sq = zeros(Bool, N, N)
     mask_sq[20:30, 20:30] .= true
 
+    # mask triangles
     mask_triangle_0 = zeros(Bool, N, N)
     mask_triangle_1 = zeros(Bool, N, N)
     mask_triangle_2 = zeros(Bool, N, N)
@@ -154,7 +266,19 @@ function get_masks(N::Int64)::Tuple{Vector{Matrix{Bool}},Vector{String}}
         mask_triangle_3[max(1 + Int(N / 2 - i), fld(2N, 5)):min(Int(N / 2) + i - 1, N - fld(2N, 5)), max(Int(N / 2) + 1 - i, fld(2N, 5))] .= true
     end
 
-    return [mask_sq, mask_triangle_0, mask_triangle_1, mask_triangle_2, mask_triangle_3], ["Square", "Triangle 0", "Triangle 1", "Triangle 2", "Triangle 3"]
+    # mask circle
+    mask_circle = zeros(Bool, N, N)
+    center = (N / 2, N / 2)
+    radius = N / 10
+    for i in 1:N
+        for j in 1:N
+            if (i - center[1])^2 + (j - center[2])^2 < radius^2
+                mask_circle[i, j] = true
+            end
+        end
+    end
+
+    return [mask_sq, mask_triangle_3, mask_circle, mask_triangle_0, mask_triangle_1, mask_triangle_2], ["Square", "Triangle 3", "Circle", "Triangle 0", "Triangle 1", "Triangle 2",]
 end
 
 
@@ -168,23 +292,58 @@ function plot_masks(masks::Vector{Matrix{Bool}}, labels::Vector{String}; N::Int6
 
     plot(plots..., layout=(2, 3), size=(1200, 800), dpi=300, suptitle="Masks for diffusion simulation")
 
-    savefig("plots/diffusion_masks.png")
+    _savefig("plots/diffusion_masks.png")
 end
 
 
-function plot_sink_simulations(c_0::Matrix{Float64}, masks::Vector{Matrix{Bool}}, labels::Vector{String}; N::Int64=50, L::Float64=1.0, tol::Float64=1e-6, omega_sor::Float64=1.9, i_max::Int64=10_000)
-    plots = []
-    heatmap_kwargs = get_heatmap_kwargs(N, L)
+function plot_sink_simulations(c_0::Matrix{Float64}, masks::Vector{Matrix{Bool}}, labels::Vector{String}; N::Int64=50, L::Float64=1.0, tol::Float64=1e-6, omega_sor::Float64=1.9, i_max::Int64=10_000, output::String="plots/diffusion_sinks.png")
+    x = range(0, stop=L, length=N)
+    y = range(0, stop=L, length=N)
 
-    for (mask, label) in zip(masks, labels)
+    nplots = length(masks)
+    ncols = min(3, max(1, nplots))
+    nrows = cld(nplots, ncols)
+    p_all = plot(
+        layout=(nrows, ncols),
+        size=(1200, 800),
+        dpi=300,
+        show=false,
+        margin=2Plots.mm,
+        top_margin=1Plots.mm,
+        bottom_margin=2Plots.mm,
+    )
+
+    # Pass 1: render heatmaps only.
+    for (i, (mask, label)) in enumerate(zip(masks, labels))
         c, _deltas = solve_until_tol(c_next_SOR_sink!, c_0, tol, i_max, omega_sor, mask)
-
-        push!(plots, heatmap(c'; title=label, heatmap_kwargs...))
+        heatmap!(
+            p_all,
+            x,
+            y,
+            c';
+            subplot=i,
+            title=label,
+            xlabel="x",
+            ylabel="y",
+            aspect_ratio=1,
+            clims=(0, 1),
+            xlims=(0, L),
+            ylims=(0, L),
+            widen=false,
+            yflip=false,
+            dpi=300,
+            legend=true,
+        )
     end
 
-    plot(plots..., layout=(2, 3), size=(1200, 800), dpi=300, suptitle="Diffusion simulation with sinks")
+    # Pass 2: overlay sink images on the final grid plot.
+    for (i, mask) in enumerate(masks)
+        _overlay_image!(p_all, x, y, mask; subplot_idx=i, image_path="input/sink", scale=0.12)
+    end
 
-    savefig("plots/diffusion_sinks.png")
+    output_path = _savefig(p_all, output)
+    @info "Saved sink simulation plot" output_path
+    return output_path
 end
 
 
@@ -199,28 +358,60 @@ function plot_iteration_count_sinks(c_0::Matrix{Float64}, omegas::Vector{Float64
         plot!(omegas, k_converge, label=label)
     end
 
-    savefig("plots/sor_omega_sinks.png")
+    _savefig("plots/sor_omega_sinks.png")
 end
 
 
-function plot_simulation_insulators(c_0::Matrix{Float64}, masks::Vector{Matrix{Bool}}, labels::Vector{String}; N::Int64=50, L::Float64=1.0, omega::Float64=1.85, tol::Float64=1e-6, i_max::Int64=10_000)
-    plots = []
-    heatmap_kwargs = get_heatmap_kwargs(N, L)
+function plot_simulation_insulators(c_0::Matrix{Float64}, masks::Vector{Matrix{Bool}}, labels::Vector{String}; N::Int64=50, L::Float64=1.0, omega::Float64=1.85, tol::Float64=1e-6, i_max::Int64=10_000, output::String="plots/diffusion_insulators.png")
+    x = range(0, stop=L, length=N)
+    y = range(0, stop=L, length=N)
 
-    # Run simulations for each mask
-    for mask in masks
-        c, _deltas = solve_until_tol(c_next_SOR_sink_insulate!, c_0, tol, i_max, omega; (insulate_mask = mask))
-        push!(plots, heatmap(c'; heatmap_kwargs...))
-    end
-
-    # Plot together
-    plot(
-        plots...,
-        dpi=150,
+    nplots = length(masks)
+    ncols = min(3, max(1, nplots))
+    nrows = cld(nplots, ncols)
+    p_all = plot(
+        layout=(nrows, ncols),
         size=(1200, 800),
+        dpi=300,
+        show=false,
+        margin=2Plots.mm,
+        top_margin=1Plots.mm,
+        bottom_margin=2Plots.mm,
     )
 
-    savefig("plots/diffusion_insulators.png")
+    # Pass 1: render heatmaps only.
+    for (i, (mask, label)) in enumerate(zip(masks, labels))
+        c, _deltas = solve_until_tol(c_next_SOR_sink_insulate!, c_0, tol, i_max, omega; (insulate_mask = mask))
+        heatmap!(
+            p_all,
+            x,
+            y,
+            c';
+            subplot=i,
+            title=label,
+            xlabel="x",
+            ylabel="y",
+            aspect_ratio=1,
+            clims=(0, 1),
+            xlims=(0, L),
+            ylims=(0, L),
+            widen=false,
+            yflip=false,
+            top_margin=1Plots.mm,
+            bottom_margin=2Plots.mm,
+            dpi=150,
+            legend=true,
+        )
+    end
+
+    # Pass 2: overlay sink image on final grid.
+    for (i, mask) in enumerate(masks)
+        _overlay_image!(p_all, x, y, mask; subplot_idx=i, image_path="input/isolator", scale=0.1)
+    end
+
+    output_path = _savefig(p_all, output)
+    @info "Saved insulator simulation plot" output_path
+    return output_path
 end
 
 
@@ -247,21 +438,25 @@ function main(; do_bench=false)
     omegas_stage_2_sinks = 1.95:0.01:1.95
     omegas_sinks = vcat(omegas_stage_1_sinks, omegas_stage_2_sinks)
 
-    # Plot solution at k iterations for all methods
-    @info "Plotting solutions at k=$k iterations..."
-    plot_solutions_at_k([c_next_jacobi, c_next_gauss_seidel!, c_next_SOR!], ["Jacobi", "Gauss-Seidel", "SOR"], c_0, k; D=D, L=L, N=N)
+    test = false
 
-    # Plot error at convergence for all methods
-    @info "Plotting error at convergence..."
-    plot_error_at_convergence([c_next_jacobi, c_next_gauss_seidel!, c_next_SOR!], ["Jacobi", "Gauss-Seidel", "SOR"], c_0; D=D, L=L, N=N, tol=tol)
+    if test
+        # Plot solution at k iterations for all methods
+        @info "Plotting solutions at k=$k iterations..."
+        plot_solutions_at_k([c_next_jacobi, c_next_gauss_seidel!, c_next_SOR!], ["Jacobi", "Gauss-Seidel", "SOR"], c_0, k; D=D, L=L, N=N)
 
-    # Plot deltas until for equal max iterations
-    @info "Plotting deltas for equal max iterations..."
-    plot_deltas_equal_iterations(c_0; tol=tol, omegas=omegas_test)
+        # Plot error at convergence for all methods
+        @info "Plotting error at convergence..."
+        plot_error_at_convergence([c_next_jacobi, c_next_gauss_seidel!, c_next_SOR!], ["Jacobi", "Gauss-Seidel", "SOR"], c_0; D=D, L=L, N=N, tol=tol)
 
-    # Plot optimal omega
-    @info "Plotting optimal omega..."
-    @time "Optimal omega found" plot_optimal_omega(c_0; tol=tol, omegas_stage_1=1.5:0.05:1.90, omegas_stage_2=1.90:0.0001:1.99)
+        # Plot deltas until for equal max iterations
+        @info "Plotting deltas for equal max iterations..."
+        plot_deltas_equal_iterations(c_0; tol=tol, omegas=omegas_test)
+
+        # Plot optimal omega
+        @info "Plotting optimal omega..."
+        @time "Optimal omega found" plot_optimal_omega(c_0; tol=tol, omegas_stage_1=1.5:0.05:1.90, omegas_stage_2=1.90:0.0001:1.99)
+    end
 
     # Generate masks for diffusion simulation
     @info "Generating masks..."

@@ -13,6 +13,7 @@ dependencies = [
     "Printf",
     "LaTeXStrings",
     "ProgressMeter",
+    "ImageIO"
 ]
 
 Pkg.add(dependencies)
