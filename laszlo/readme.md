@@ -14,7 +14,12 @@ julia --project=. -e "using Pkg; Pkg.instantiate()"
 ```bash 
 julia --project=. main.jl
 ```
-Optional flag: bench to run benchmarks on different implementations of used algorithms
+Optional flag: `bench` to run benchmarks on different implementations of used algorithms
 ```bash
 julia --project=. main.jl bench
+```
+
+Optional flag: `gif` to create animations of the simulations
+```bash
+julia --project=. main.jl gif
 ```

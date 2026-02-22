@@ -22,7 +22,7 @@ initial_condition_3 = (x) -> (x > 1 / 5 && x < 2 / 5) ? sin(10pi * x) : 0.0
 
 
 
-function main(; do_bench::Bool=false)
+function main(; do_bench::Bool=false, do_gif::Bool=false)
     if do_bench
         @info "Running benchmarks..."
 
@@ -33,7 +33,6 @@ function main(; do_bench::Bool=false)
         bench_funcs([wave_equation, wave_equation_inb, wave_equation_vec, wave_equation_dist, wave_equation_simd, wave_equation_avx, wave_equation_dist_avx], psi_tst, 1.0, 1.0, N_test)
     end
 
-    GIF = false
 
     # Simulation parameters
     t_0 = 0.0
@@ -64,7 +63,7 @@ function main(; do_bench::Bool=false)
         plot_wave_multi(solution_3_euler, x, "Euler, IC 3", tp_indices; output="plots/ex_1_wave_multi_euler_ic3.png")
     end
 
-    if GIF
+    if do_gif
         @info "Creating animation for Euler method..."
         @time "Created Euler method animation" begin
             distributed_gif(plots, "plots/ex_1_anim_euler.gif", do_palette=true)
@@ -83,7 +82,7 @@ function main(; do_bench::Bool=false)
         plots_leapfrog = get_wave_plots(t_f, t_0, dt, L, N, solution_1_leapfrog, solution_2_leapfrog, solution_3_leapfrog)
     end
 
-    if GIF
+    if do_gif
         @info "Creating animation for Leapfrog method..."
         @time "Created Leapfrog method animation" begin
             distributed_gif(plots_leapfrog, "plots/ex_1_anim_leapfrog.gif", do_palette=true)

@@ -415,7 +415,7 @@ end
 
 
 
-function main(; do_bench=false, test=true)
+function main(; do_bench=false)
     if do_bench
         # Setup for benchmarking
         N = 50
