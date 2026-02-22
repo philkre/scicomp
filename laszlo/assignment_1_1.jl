@@ -21,7 +21,6 @@ initial_condition_2 = (x) -> sin(5pi * x)
 initial_condition_3 = (x) -> (x > 1 / 5 && x < 2 / 5) ? sin(10pi * x) : 0.0
 
 
-
 function main(; do_bench::Bool=false, do_gif::Bool=false)
     if do_bench
         @info "Running benchmarks..."

@@ -3,13 +3,7 @@ using Plots
 using LaTeXStrings
 using Statistics
 
-function _resolve_output_path(output::String)::String
-    if isabspath(output)
-        return output
-    end
-    # Make relative paths deterministic: relative to laszlo/ (parent of helpers/)
-    return normpath(joinpath(@__DIR__, "..", output))
-end
+include("savefig.jl")
 
 function get_wave_plots(t_f::Float64, t_0::Float64, dt::Float64, L::Float64, N::Int, solution_1::Matrix, solution_2::Matrix, solution_3::Matrix)::Vector{Plots.Plot{Plots.GRBackend}}
     x = range(0, L, length=N)
