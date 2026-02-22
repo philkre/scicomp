@@ -4,7 +4,7 @@ using SpecialFunctions
 
 
 """
-    c_next(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)
+    c_next(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)::Matrix{Float64}
 
 Compute the next time step for the diffusion equation using explicit finite differences.
 
@@ -22,7 +22,7 @@ Compute the next time step for the diffusion equation using explicit finite diff
 - Top boundary (y=1): c = 1.0
 - x-direction: Periodic
 """
-function c_next(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)
+function c_next(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)::Matrix{Float64}
     N = size(c, 1)
     c_new = similar(c)
 
@@ -47,7 +47,7 @@ end
 
 
 """
-    c_next_single_loop(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)
+    c_next_single_loop(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)::Matrix{Float64}
 
 Compute the next time step using a single vectorized loop with periodic boundary conditions.
 
@@ -63,7 +63,7 @@ Compute the next time step using a single vectorized loop with periodic boundary
 # Notes
 Uses a single loop with explicit boundary wrapping for improved performance.
 """
-function c_next_single_loop(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)
+function c_next_single_loop(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)::Matrix{Float64}
     N = size(c, 1)
     c_new = zeros(N, N)
 
@@ -84,7 +84,7 @@ end
 
 
 """
-    c_next_dist_turbo(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)
+    c_next_dist_turbo(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)::Matrix{Float64}
 
 Compute the next time step using distributed computing with turbo optimization.
 
@@ -100,7 +100,7 @@ Compute the next time step using distributed computing with turbo optimization.
 # Notes
 Combines `@distributed` and `@turbo` for parallel computation.
 """
-function c_next_dist_turbo(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)
+function c_next_dist_turbo(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)::Matrix{Float64}
     N = size(c, 1)
     c_new = similar(c)
 
@@ -126,7 +126,7 @@ end
 
 
 """
-    c_next_dist(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)
+    c_next_dist(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)::Matrix{Float64}
 
 Compute the next time step using distributed computing with flattened indexing.
 
@@ -142,7 +142,7 @@ Compute the next time step using distributed computing with flattened indexing.
 # Notes
 Distributes work by flattening the 2D grid into a 1D range for parallel processing.
 """
-function c_next_dist(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)
+function c_next_dist(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)::Matrix{Float64}
     N = size(c, 1)
     c_new = similar(c)
 
@@ -168,7 +168,7 @@ end
 
 
 """
-    c_next_jacobi(c::Matrix{Float64})
+    c_next_jacobi(c::Matrix{Float64})::Matrix{Float64}
 
 Compute the next iteration using the Jacobi method for steady-state diffusion.
 
@@ -181,7 +181,7 @@ Compute the next iteration using the Jacobi method for steady-state diffusion.
 # Notes
 Uses Fourier number Fo = 0.25 for optimal convergence.
 """
-function c_next_jacobi(c::Matrix{Float64})
+function c_next_jacobi(c::Matrix{Float64})::Matrix{Float64}
     N = size(c, 1)
     c_new = similar(c)
 
@@ -206,20 +206,20 @@ end
 
 
 """
-    c_next_gauss_seidel!(c::AbstractMatrix{Float64})
+    c_next_gauss_seidel!(c::Matrix{Float64})::Matrix{Float64}
 
 Compute the next iteration using the Gauss-Seidel method (in-place).
 
 # Arguments
-- `c::AbstractMatrix{Float64}`: Concentration field (modified in-place)
+- `c::Matrix{Float64}`: Concentration field (modified in-place)
 
 # Returns
-- `AbstractMatrix{Float64}`: Reference to the updated concentration field
+- `Matrix{Float64}`: Reference to the updated concentration field
 
 # Notes
 Updates the matrix in-place using the most recently computed values.
 """
-function c_next_gauss_seidel!(c::AbstractMatrix{Float64})
+function c_next_gauss_seidel!(c::Matrix{Float64})::Matrix{Float64}
     N = size(c, 1)
     Fo = 0.25
 
@@ -236,21 +236,21 @@ end
 
 
 """
-    c_next_SOR!(c::AbstractMatrix{Float64}, omega::Float64=1.85)
+    c_next_SOR!(c::Matrix{Float64}, omega::Float64=1.85)::Matrix{Float64}
 
 Compute the next iteration using the Successive Over-Relaxation (SOR) method.
 
 # Arguments
-- `c::AbstractMatrix{Float64}`: Concentration field (modified in-place)
+- `c::Matrix{Float64}`: Concentration field (modified in-place)
 - `omega::Float64`: Relaxation parameter (default: 1.85)
 
 # Returns
-- `AbstractMatrix{Float64}`: Reference to the updated concentration field
+- `Matrix{Float64}`: Reference to the updated concentration field
 
 # Notes
 Omega values: ω = 1 gives Gauss-Seidel, ω > 1 gives over-relaxation, ω < 1 gives under-relaxation.
 """
-function c_next_SOR!(c::AbstractMatrix{Float64}, omega::Float64=1.85)
+function c_next_SOR!(c::Matrix{Float64}, omega::Float64=1.85)::Matrix{Float64}
     N = size(c, 1)
     Fo = 0.25 * omega
 
@@ -310,7 +310,7 @@ end
 
 
 """
-    c_anal(x::Float64, t::Float64, D::Float64; i_max::Int=100)
+    c_anal(x::Float64, t::Float64, D::Float64; i_max::Int=100)::Float64
 using JLD2
 
 Analytical solution for the diffusion equation with boundary conditions c(y=0)=0 and c(y=1)=1.
@@ -457,22 +457,22 @@ end
 
 
 """
-    c_next_SOR_sink!(c::AbstractMatrix{Float64}, omega::Float64, sink_mask::AbstractMatrix{Bool})
+    c_next_SOR_sink!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool})::Matrix{Float64}
 
 Compute the next iteration using SOR with sink regions where concentration is fixed at zero.
 
 # Arguments
-- `c::AbstractMatrix{Float64}`: Concentration field (modified in-place)
+- `c::Matrix{Float64}`: Concentration field (modified in-place)
 - `omega::Float64`: Relaxation parameter
-- `sink_mask::AbstractMatrix{Bool}`: Boolean mask indicating sink regions (true = sink)
+- `sink_mask::Matrix{Bool}`: Boolean mask indicating sink regions (true = sink)
 
 # Returns
-- `AbstractMatrix{Float64}`: Reference to the updated concentration field
+- `Matrix{Float64}`: Reference to the updated concentration field
 
 # Notes
 Cells marked as sinks have their concentration fixed at 0.0 and are not updated by the SOR iteration.
 """
-function c_next_SOR_sink!(c::AbstractMatrix{Float64}, omega::Float64, sink_mask::AbstractMatrix{Bool})
+function c_next_SOR_sink!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool})::Matrix{Float64}
     N = size(c, 1)
     Fo = 0.25 * omega
 
@@ -507,24 +507,24 @@ end
 
 
 """
-    c_next_SOR_sink_insulate!(c::AbstractMatrix{Float64}, omega::Float64; sink_mask::AbstractMatrix{Bool}, insulate_mask::AbstractMatrix{Bool})
+    c_next_SOR_sink_insulate!(c::Matrix{Float64}, omega::Float64; sink_mask::Matrix{Bool}, insulate_mask::Matrix{Bool})::Matrix{Float64}
 
 Compute the next iteration using SOR with both sink regions and insulated boundaries.
 
 # Arguments
-- `c::AbstractMatrix{Float64}`: Concentration field (modified in-place)
+- `c::Matrix{Float64}`: Concentration field (modified in-place)
 - `omega::Float64`: Relaxation parameter
-- `sink_mask::AbstractMatrix{Bool}`: Boolean mask for sink regions (default: no sinks)
-- `insulate_mask::AbstractMatrix{Bool}`: Boolean mask for insulated boundaries (default: no insulation)
+- `sink_mask::Matrix{Bool}`: Boolean mask for sink regions (default: no sinks)
+- `insulate_mask::Matrix{Bool}`: Boolean mask for insulated boundaries (default: no insulation)
 
 # Returns
-- `AbstractMatrix{Float64}`: Reference to the updated concentration field
+- `Matrix{Float64}`: Reference to the updated concentration field
 
 # Notes
 - Sink cells: concentration fixed at 0.0, not updated
 - Insulated cells: act as reflective boundaries (zero-flux condition)
 """
-function c_next_SOR_sink_insulate!(c::AbstractMatrix{Float64}, omega::Float64; sink_mask::AbstractMatrix{Bool}=zeros(Bool, size(c)), insulate_mask::AbstractMatrix{Bool}=zeros(Bool, size(c)))
+function c_next_SOR_sink_insulate!(c::Matrix{Float64}, omega::Float64; sink_mask::Matrix{Bool}=zeros(Bool, size(c)), insulate_mask::Matrix{Bool}=zeros(Bool, size(c)))::Matrix{Float64}
     N = size(c, 1)
     Fo = 0.25 * omega
 
