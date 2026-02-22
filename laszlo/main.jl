@@ -10,9 +10,9 @@ do_cache::Bool = false
 "Do assignment 1"
 do_ass_1 = true
 "Do assignment 2"
-do_ass_2 = false
+do_ass_2 = true
 "Do assignment 6"
-do_ass_6 = false
+do_ass_6 = true
 
 
 if abspath(PROGRAM_FILE) == @__FILE__
