@@ -1,12 +1,12 @@
 using Distributed
 
 # Globals
-"Do benchmarking"
+"Do benchmarking default behavior"
 do_bench::Bool = false
-"Use caching for diffusion simulation"
+"Use caching for diffusion simulation default behavior"
 do_cache::Bool = false
 "Do assignment 1"
-do_ass_1 = false
+do_ass_1 = true
 "Do assignment 2"
 do_ass_2 = true
 "Do assignment 6"

@@ -62,7 +62,7 @@ end
 function plot_intervals(c0::Matrix, intervals::Vector{Float64}, results::Vector{Matrix{Float64}}; L::Float64, N::Int64, t_0::Float64=0.0)
     # Plot concentration along y-axis at x=0 for all time intervals
     y = range(0, stop=L, length=size(c0, 2))
-    p = plot(legend=true, xlims=(0, L), dpi=300)
+    p = plot(xlims=(0, L), dpi=300)
     for (t_end, c) in zip(intervals, results)
         plot!(p, y, c[1, :], label="t = $(t_end) (numerical)", dpi=300)
     end

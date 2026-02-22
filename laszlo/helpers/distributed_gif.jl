@@ -22,7 +22,6 @@ Uses Plots.jl's Animation framework.
 """
 function gif_slow(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String; fps::Int64=30)
     # Animate the solution and save frames
-    default(legend=false)
     mkpath(dirname(gifname))
 
     anim = Animation()

@@ -332,7 +332,6 @@ function plot_sink_simulations(c_0::Matrix{Float64}, masks::Vector{Matrix{Bool}}
             widen=false,
             yflip=false,
             dpi=300,
-            legend=true,
         )
     end
 
@@ -416,7 +415,7 @@ end
 
 
 
-function main(; do_bench=false)
+function main(; do_bench=false, test=true)
     if do_bench
         # Setup for benchmarking
         N = 50
