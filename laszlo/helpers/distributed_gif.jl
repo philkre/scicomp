@@ -58,14 +58,14 @@ function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::St
     tmp_dirname = "tmp_gif" * string(rand(1:10000))  # Generate a unique temporary directory name
     mkdir(tmp_dirname)
 
-    i = 0
-    @sync @distributed for p in plots
-        savefig(p, "$(tmp_dirname)/frame_$(lpad(i, 4, '0')).png")
-        i += 1
+    pad_length = length(string(length(plots)))  # Determine padding length based on number of frames
+    @sync @distributed for i in 1:length(plots)
+        p = plots[i]
+        savefig(p, "$(tmp_dirname)/frame_$(lpad(i, pad_length, '0')).png")
     end
 
     # Build full path pattern for ffmpeg
-    frame_pattern = joinpath(tmp_dirname, "frame_%04d.png")
+    frame_pattern = joinpath(tmp_dirname, "frame_%0$(pad_length)d.png")
 
     # Use FFMPEG to create GIF
     if do_palette
