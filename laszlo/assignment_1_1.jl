@@ -40,7 +40,7 @@ function main(; do_bench::Bool=false, do_gif::Bool=false)
     dt = 0.001
     c = 1.0
     L = 1.0
-    N = 100
+    N = 950
     x = range(0, L, length=N)
     tvals = range(t_0, step=dt, length=Int((t_f - t_0) / dt))
     ts = [0.0, 0.1, 0.3, 0.8, 1.0, 2.0]
