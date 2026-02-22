@@ -423,7 +423,7 @@ end
 
 
 """
-    get_iteration_count_SOR(c_0::Matrix{Float64}, omega::Float64, tol::Float64; i_max=20000, check_interval::Int64=1)
+    get_iteration_count_SOR(c_0::Matrix{Float64}, omega::Float64, tol::Float64; i_max=20000, check_interval::Int64=1)::Int64
 
 Compute the number of iterations required for SOR to converge.
 
@@ -435,9 +435,9 @@ Compute the number of iterations required for SOR to converge.
 - `check_interval::Int64`: Check convergence every N iterations (default: 1)
 
 # Returns
-- `Int`: Number of iterations required for convergence
+- `Int64`: Number of iterations required for convergence
 """
-function get_iteration_count_SOR(c_0::Matrix{Float64}, omega::Float64, tol::Float64; i_max=20000, check_interval::Int64=1)
+function get_iteration_count_SOR(c_0::Matrix{Float64}, omega::Float64, tol::Float64; i_max=60_000, check_interval::Int64=1)::Int64
     c_new = copy(c_0)
 
     for i in 1:i_max
@@ -452,7 +452,9 @@ function get_iteration_count_SOR(c_0::Matrix{Float64}, omega::Float64, tol::Floa
         end
     end
 
-    return i
+    @warn "SOR did not converge within $i_max iterations for omega = $omega"
+
+    return i_max
 end
 
 

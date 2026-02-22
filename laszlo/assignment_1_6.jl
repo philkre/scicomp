@@ -16,6 +16,7 @@ include("helpers/savefig.jl")
 include("helpers/overlay.jl")
 include("helpers/heatmap_kwargs.jl")
 using Plots
+pythonplot()
 
 
 function solution_at_k(solver::Function, k::Int64, c::Matrix{Float64}, args...; kwargs...)
@@ -139,6 +140,42 @@ function plot_optimal_omega(c_0::Matrix{Float64}; tol::Float64=1e-6, omegas_stag
 
     vline!(plot_omega, [optimal_omega], linestyle=:dot, label=L"\omega_{opt} = %$optimal_omega")
     _savefig("plots/sor_optimal_omega.png")
+end
+
+
+function plot_omega_vs_N(; tol::Float64=1e-6, omegas=0.5:0.1:1.5, N_values=5:5:100, contour_levels=[150, 600, 2000, 4500, 9000, 15000, 22000, 30000, 42000, 52000])
+    n = length(N_values)
+    prog = Progress(n, 1, "Calculating iteration counts for contour plot...")
+
+    ch = RemoteChannel(() -> Channel{Int}(n))  # buffer n updates
+    # consumer task on master that updates the progress bar
+    t = @async begin
+        for _ in 1:n
+            take!(ch)
+            next!(prog)
+        end
+    end
+
+    k_converges = @distributed (vcat) for N in N_values
+        # Init concentration grid with boundary condition
+        c_0 = zeros(N, N)
+        c_0[:, end] .= 1.0
+
+        k_converge = [get_iteration_count_SOR(c_0, omega, tol) for omega in omegas]
+        put!(ch, 1)
+
+        [k_converge]
+    end
+
+    wait(t)  # Ensure the progress bar task completes before proceeding
+    # Transpose and stack k_converges to get z values for contour plot
+    z_vals = stack(k_converges, dims=1)'
+    # Make contour plot
+    contour(N_values, omegas, z_vals, levels=contour_levels,
+        clabels=true, cbar=false, lw=1, xlabel="N", ylabel=L"\omega", title="SOR Iteration Count vs N and Omega",
+        dpi=300)
+
+    _savefig("plots/sor_omega_vs_N.png")
 end
 
 
@@ -346,6 +383,10 @@ function main(; do_bench=false)
     # Plot optimal omega
     @info "Plotting optimal omega..."
     @time "Optimal omega found" plot_optimal_omega(c_0; tol=tol, omegas_stage_1=1.5:0.05:1.90, omegas_stage_2=1.90:0.0001:1.99)
+
+    # Plot effect of grid size on iteration count for different omegas
+    @info "Plotting effect of grid size on iteration count for different omegas..."
+    @time "Plotted effect of grid size on iteration count for different omegas" plot_omega_vs_N()
 
     # Generate masks for diffusion simulation
     @info "Generating masks..."
