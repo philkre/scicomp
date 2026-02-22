@@ -58,12 +58,27 @@ function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::St
     # Create a temporary directory to store frames
     tmp_dirname = "tmp_gif" * string(rand(1:10000))  # Generate a unique temporary directory name
     mkdir(tmp_dirname)
-
     pad_length = length(string(length(plots)))  # Determine padding length based on number of frames
-    @sync @distributed for i in 1:length(plots)
+
+    n = length(plots)
+    prog = Progress(n, 1, "Saving GIF frames...")
+
+    ch = RemoteChannel(() -> Channel{Int}(n))  # buffer n updates
+    # consumer task on master that updates the progress bar
+    t = @async begin
+        for _ in 1:n
+            take!(ch)
+            next!(prog)
+        end
+    end
+
+    @sync @distributed for i in 1:n
         p = plots[i]
         savefig(p, "$(tmp_dirname)/frame_$(lpad(i, pad_length, '0')).png")
+        put!(ch, 1)
     end
+
+    wait(t)  # Ensure the progress bar task completes before proceeding
 
     # Build full path pattern for ffmpeg
     frame_pattern = joinpath(tmp_dirname, "frame_%0$(pad_length)d.png")
