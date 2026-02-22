@@ -147,7 +147,7 @@ function plot_analytical_difference(c0::Matrix{Float64}, intervals::Vector{Float
     return current()
 end
 
-function main(; do_bench::Bool=false, do_cache::Bool=false)
+function main(; do_bench::Bool=false, do_cache::Bool=false, do_gif::Bool=false)
     if do_bench
         # Setup for benchmarking
         N = 100
@@ -194,9 +194,11 @@ function main(; do_bench::Bool=false, do_cache::Bool=false)
     @info "Plotting heatmaps for each interval..."
     plot_heatmaps(t_intervals, results; L=L, N=N)
 
-    # Animate diffusion process
-    @info "Animating diffusion process..."
-    @time "Saved animated diffusion process" animate_diffusion(c_0; L=L, N=N, D=D, dt=dt)
+    if do_gif
+        # Animate diffusion process
+        @info "Animating diffusion process..."
+        @time "Saved animated diffusion process" animate_diffusion(c_0; L=L, N=N, D=D, dt=dt)
+    end
 end
 
 end

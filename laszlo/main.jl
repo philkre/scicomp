@@ -10,9 +10,9 @@ do_cache::Bool = false
 "Do assignment 1"
 do_ass_1 = true
 "Do assignment 2"
-do_ass_2 = true
+do_ass_2 = false
 "Do assignment 6"
-do_ass_6 = true
+do_ass_6 = false
 
 
 if abspath(PROGRAM_FILE) == @__FILE__
@@ -57,7 +57,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
         # Run the main function
         @info "Running main function for Assignment 1.2..."
-        @time "Assigment 1.2 completed" main_1_2(; do_bench=do_bench, do_cache=do_cache)
+        @time "Assigment 1.2 completed" main_1_2(; do_bench=do_bench, do_cache=do_cache, do_gif=do_gif)
     end
 
 
