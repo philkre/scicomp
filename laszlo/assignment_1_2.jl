@@ -9,14 +9,41 @@ include("helpers/diffusion.jl")
 # Utilities
 using JLD2
 using Printf
+using LaTeXStrings
 
 # Plotting
 using Plots
 include("helpers/distributed_gif.jl")
 include("helpers/heatmap_kwargs.jl")
 
+function _resolve_output_path(output::String)::String
+    if isabspath(output)
+        return output
+    end
+    return normpath(joinpath(@__DIR__, output))
+end
 
+function _savefig(output::String)
+    output_path = _resolve_output_path(output)
+    mkpath(dirname(output_path))
+    if isfile(output_path)
+        rm(output_path; force=true)
+    end
+    savefig(output_path)
+    isfile(output_path) || error("Failed to save plot to $output_path")
+    return output_path
+end
 
+function _savefig(p, output::String)
+    output_path = _resolve_output_path(output)
+    mkpath(dirname(output_path))
+    if isfile(output_path)
+        rm(output_path; force=true)
+    end
+    savefig(p, output_path)
+    isfile(output_path) || error("Failed to save plot to $output_path")
+    return output_path
+end
 
 function get_c_intervals(c0::Matrix{Float64}, intervals::Vector{Float64}; L::Float64, N::Int64, D::Float64, dt::Float64, t_0::Float64=0.0)::Vector{Matrix{Float64}}
     c = c0
@@ -34,25 +61,41 @@ end
 
 function plot_intervals(c0::Matrix, intervals::Vector{Float64}, results::Vector{Matrix{Float64}}; L::Float64, N::Int64, t_0::Float64=0.0)
     # Plot concentration along y-axis at x=0 for all time intervals
-    plot(c0[1, :], title="Concentration along y-axis", xlabel="y", ylabel="Concentration", label="t = $(t_0)", legend=true, xticks=get_heatmap_ticks(N, L), xlims=get_heatmap_lims(N), dpi=300)
+    y = range(0, stop=L, length=size(c0, 2))
+    p = plot(legend=true, xlims=(0, L), dpi=300)
     for (t_end, c) in zip(intervals, results)
-        plot!(c[1, :], label="t = $(t_end) (numerical)")
+        plot!(p, y, c[1, :], label="t = $(t_end) (numerical)", dpi=300)
     end
-
-    savefig("plots/diffusion_yprofile.png")
-    return current()
+    xlabel!(p, L"y")
+    ylabel!(p, L"c(y)")
+    _savefig(p, "plots/diffusion_yprofile.png")
+    return p
 end
 
 
 function add_analytical_plot!(plt::Plots.Plot{Plots.GRBackend}, intervals::Vector{Float64}, analytical_sol::Function; D::Float64, L::Float64, N::Int64)
-    for t in intervals
-        plot!(plt, analytical_sol(t, D, L, N), label="t = $(t) (analytical)", linestyle=:dash)
+    y = range(0, stop=L, length=N)
+
+    # Match each analytical curve to the corresponding numerical curve colour.
+    # Series order in `plt`: initial t0 first, then numerical interval curves.
+    for (i, t) in enumerate(intervals)
+
+        colour = if i <= length(plt.series_list)
+            get(plt.series_list[i].plotattributes, :seriescolor, nothing)
+        else
+            nothing
+        end
+
+        if isnothing(colour)
+            plot!(plt, y, analytical_sol(t, D, L, N), label="t = $(t) (analytical)", linestyle=:dash, dpi=300)
+        else
+            plot!(plt, y, analytical_sol(t, D, L, N), label="t = $(t) (analytical)", linestyle=:dash, dpi=300, seriescolor=colour)
+        end
     end
 
-    savefig("plots/diffusion_yprofile_analytical.png")
-    return current()
+    _savefig(plt, "plots/diffusion_yprofile_analytical.png")
+    return plt
 end
-
 
 function plot_heatmaps(intervals::Vector{Float64}, results::Vector{Matrix{Float64}}; L::Float64, N::Int64)
     plots = []
@@ -61,7 +104,7 @@ function plot_heatmaps(intervals::Vector{Float64}, results::Vector{Matrix{Float6
         push!(plots, heatmap(c'; title="t = $(t_end)", heatmap_kwargs...))
     end
     plot(plots..., layout=(2, 2), size=(800, 800), dpi=300, suptitle="Diffusion process at different time points")
-    savefig("plots/diffusion_heatmaps.png")
+    _savefig("plots/diffusion_heatmaps.png")
 end
 
 
@@ -86,9 +129,23 @@ function animate_diffusion(c_0::Matrix{Float64}; L::Float64, N::Int64, D::Float6
         frames
     end)()
 
-    gif_slow(plots, "plots/diffusion_evolution.gif", fps=30)
+    gif_slow(plots, _resolve_output_path("plots/diffusion_evolution.gif"), fps=30)
 end
 
+function plot_analytical_difference(c0::Matrix{Float64}, intervals::Vector{Float64}, results::Vector{Matrix{Float64}}, analytical_sol::Function; L::Float64, N::Int64, D::Float64)
+    y = range(0, stop=L, length=size(c0, 2))
+    plot(legend=true, xlims=(0, L), dpi=300)
+    for (t_end, c) in zip(intervals, results)
+        analytical_profile = analytical_sol(t_end, D, L, N)
+        difference = c[1, :] - analytical_profile
+        plot!(y, difference, label="t = $(t_end)")
+    end
+
+    xlabel!(L"y")
+    ylabel!(L"\delta c(y)")
+    _savefig("plots/diffusion_difference.png")
+    return current()
+end
 
 function main(; do_bench::Bool=false, do_cache::Bool=false)
     if do_bench
@@ -130,6 +187,8 @@ function main(; do_bench::Bool=false, do_cache::Bool=false)
     @info "Plotting y-profile results..."
     plt_intervals = plot_intervals(c_0, t_intervals, results; L=L, N=N, t_0=t_0)
     add_analytical_plot!(plt_intervals, t_intervals, analytical_sol; D=D, L=L, N=N)
+
+    plot_analytical_difference(c_0, t_intervals, results, analytical_sol; L=L, N=N, D=D)
 
     # Plot heatmaps for each interval
     @info "Plotting heatmaps for each interval..."

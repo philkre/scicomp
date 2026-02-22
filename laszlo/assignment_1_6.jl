@@ -438,25 +438,22 @@ function main(; do_bench=false)
     omegas_stage_2_sinks = 1.95:0.01:1.95
     omegas_sinks = vcat(omegas_stage_1_sinks, omegas_stage_2_sinks)
 
-    test = false
 
-    if test
-        # Plot solution at k iterations for all methods
-        @info "Plotting solutions at k=$k iterations..."
-        plot_solutions_at_k([c_next_jacobi, c_next_gauss_seidel!, c_next_SOR!], ["Jacobi", "Gauss-Seidel", "SOR"], c_0, k; D=D, L=L, N=N)
+    # Plot solution at k iterations for all methods
+    @info "Plotting solutions at k=$k iterations..."
+    plot_solutions_at_k([c_next_jacobi, c_next_gauss_seidel!, c_next_SOR!], ["Jacobi", "Gauss-Seidel", "SOR"], c_0, k; D=D, L=L, N=N)
 
-        # Plot error at convergence for all methods
-        @info "Plotting error at convergence..."
-        plot_error_at_convergence([c_next_jacobi, c_next_gauss_seidel!, c_next_SOR!], ["Jacobi", "Gauss-Seidel", "SOR"], c_0; D=D, L=L, N=N, tol=tol)
+    # Plot error at convergence for all methods
+    @info "Plotting error at convergence..."
+    plot_error_at_convergence([c_next_jacobi, c_next_gauss_seidel!, c_next_SOR!], ["Jacobi", "Gauss-Seidel", "SOR"], c_0; D=D, L=L, N=N, tol=tol)
 
-        # Plot deltas until for equal max iterations
-        @info "Plotting deltas for equal max iterations..."
-        plot_deltas_equal_iterations(c_0; tol=tol, omegas=omegas_test)
+    # Plot deltas until for equal max iterations
+    @info "Plotting deltas for equal max iterations..."
+    plot_deltas_equal_iterations(c_0; tol=tol, omegas=omegas_test)
 
-        # Plot optimal omega
-        @info "Plotting optimal omega..."
-        @time "Optimal omega found" plot_optimal_omega(c_0; tol=tol, omegas_stage_1=1.5:0.05:1.90, omegas_stage_2=1.90:0.0001:1.99)
-    end
+    # Plot optimal omega
+    @info "Plotting optimal omega..."
+    @time "Optimal omega found" plot_optimal_omega(c_0; tol=tol, omegas_stage_1=1.5:0.05:1.90, omegas_stage_2=1.90:0.0001:1.99)
 
     # Generate masks for diffusion simulation
     @info "Generating masks..."

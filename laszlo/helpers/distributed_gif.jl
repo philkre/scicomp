@@ -23,12 +23,13 @@ Uses Plots.jl's Animation framework.
 function gif_slow(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String; fps::Int64=30)
     # Animate the solution and save frames
     default(legend=false)
+    mkpath(dirname(gifname))
 
     anim = Animation()
     for p in plots
         frame(anim, p)
     end
-    gif(anim, gifname, fps=fps, dpi=300)
+    gif(anim, gifname, fps=fps)
 end
 
 
@@ -52,6 +53,8 @@ Create an animated GIF from a vector of plots using distributed computing and FF
 - Uses videotoolbox hardware acceleration on macOS when available
 """
 function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String; fps::Int64=30, do_palette=false, width=600)
+    mkpath(dirname(gifname))
+
     # Create a temporary directory to store frames
     tmp_dirname = "tmp_gif" * string(rand(1:10000))  # Generate a unique temporary directory name
     mkdir(tmp_dirname)
