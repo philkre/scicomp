@@ -1,4 +1,5 @@
 using Distributed
+using ProgressMeter
 @everywhere using Plots
 @everywhere begin
     ENV["GKSwstype"] = "nul"  # Headless mode - no display
@@ -25,7 +26,7 @@ function gif_slow(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String; f
     mkpath(dirname(gifname))
 
     anim = Animation()
-    for p in plots
+    @showprogress "Creating GIF frames..." for p in plots
         frame(anim, p)
     end
     gif(anim, gifname, fps=fps)
