@@ -161,7 +161,7 @@ function plot_omega_vs_N(; tol::Float64=1e-6, omegas=0.5:0.1:1.5, N_values=5:5:1
         c_0 = zeros(N, N)
         c_0[:, end] .= 1.0
 
-        k_converge = [get_iteration_count_SOR(c_0, omega, tol) for omega in omegas]
+        k_converge = [get_iteration_count_SOR(c_0, omega, tol; check_interval=10) for omega in omegas]
         put!(ch, 1)
 
         [k_converge]
