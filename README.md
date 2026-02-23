@@ -36,12 +36,7 @@ julia --project=. -e "using Pkg; Pkg.instantiate()"
 ```bash 
 julia --project=. assignment_2.jl
 ```
-Optional flag: `bench` to run benchmarks on different implementations of used algorithms
+Optional flags: run this command to see optional flags for assignment 2
 ```bash
-julia --project=. assignment_2.jl bench
-```
-
-Optional flag: `gif` to create animations of the simulations
-```bash
-julia --project=. assignment_2.jl gif
+julia --project=. assignment_2.jl -h
 ```
