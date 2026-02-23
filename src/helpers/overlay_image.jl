@@ -2,6 +2,27 @@ using FileIO: load
 using Plots: Colorant, alpha, red, green, blue, plot!
 using Statistics: mean
 
+
+"""
+    overlay_image!(p, x::AbstractVector{<:Real}, y::AbstractVector{<:Real}, sink_mask::AbstractMatrix{Bool}; subplot_idx::Int=1, image_path::String="src/ass_1/input/sink", scale::Float64=0.55)
+
+Overlay an image on a plot, centered on the centroid of a boolean mask.
+
+The function loads an image file, crops it to remove transparent/dark background,
+and places it on the plot centered at the mask's centroid with specified scaling.
+
+# Arguments
+- `p`: The plot object to modify
+- `x::AbstractVector{<:Real}`: X-axis coordinates
+- `y::AbstractVector{<:Real}`: Y-axis coordinates
+- `sink_mask::AbstractMatrix{Bool}`: Boolean mask indicating where to center the image
+- `subplot_idx::Int`: Subplot index for multi-panel plots (default: 1)
+- `image_path::String`: Path to image file (default: "src/ass_1/input/sink")
+- `scale::Float64`: Scale factor for image size relative to axis range (default: 0.55)
+
+# Returns
+- `Nothing`
+"""
 function overlay_image!(
     p,
     x::AbstractVector{<:Real},

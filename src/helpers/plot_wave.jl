@@ -8,6 +8,25 @@ using Statistics
 include("savefig.jl")
 using .SaveFig: resolve_output_path, auto_mkpath
 
+
+"""
+    get_wave_plots(t_f::Float64, t_0::Float64, dt::Float64, L::Float64, N::Int, solution_1::Matrix, solution_2::Matrix, solution_3::Matrix)
+
+Generate a vector of plots showing three wave solutions over time using distributed computing.
+
+# Arguments
+- `t_f::Float64`: Final time
+- `t_0::Float64`: Initial time
+- `dt::Float64`: Time step
+- `L::Float64`: Length of the spatial domain
+- `N::Int`: Number of spatial grid points
+- `solution_1::Matrix`: First solution matrix (space × time)
+- `solution_2::Matrix`: Second solution matrix (space × time)
+- `solution_3::Matrix`: Third solution matrix (space × time)
+
+# Returns
+- `Vector{Plots.Plot{Plots.GRBackend}}`: Vector of plots, one for each time step
+"""
 function get_wave_plots(t_f::Float64, t_0::Float64, dt::Float64, L::Float64, N::Int, solution_1::Matrix, solution_2::Matrix, solution_3::Matrix)::Vector{Plots.Plot{Plots.GRBackend}}
     x = range(0, L, length=N)
     i_total = Int((t_f - t_0) / dt)
@@ -19,7 +38,23 @@ function get_wave_plots(t_f::Float64, t_0::Float64, dt::Float64, L::Float64, N::
     return plots
 end
 
-function plot_wave_multi(psis::AbstractMatrix, x::AbstractVector, title_text::String, ts_idx::AbstractVector{<:Integer}; output::String="plots/ex_1_wave_multi.png")
+
+"""
+    plot_wave_multi(psis::AbstractMatrix, x::AbstractVector, title_text::String, ts_idx::AbstractVector{<:Integer}; output::String="plots/ex_1_wave_multi.png")
+
+Plot multiple wave solutions at specified time indices.
+
+# Arguments
+- `psis::AbstractMatrix`: Wave solution matrix (space × time)
+- `x::AbstractVector`: Spatial grid points
+- `title_text::String`: Plot title
+- `ts_idx::AbstractVector{<:Integer}`: Time indices to plot
+- `output::String`: Output file path (default: "plots/ex_1_wave_multi.png")
+
+# Returns
+- `Plots.Plot`: The generated plot
+"""
+function plot_wave_multi(psis::AtMatrix, x::Vector, title_text::String, ts_idx::Vector{<:Integer}; output::String="plots/ex_1_wave_multi.png")
     p = plot(dpi=300, size=(400, 400))
     for t in ts_idx
         if t == 1
@@ -39,7 +74,23 @@ function plot_wave_multi(psis::AbstractMatrix, x::AbstractVector, title_text::St
     return p
 end
 
-function plot_euler_leapfrog_energy(tvals::AbstractVector, energy_euler::AbstractVector, energy_leapfrog::AbstractVector; output::String="plots/ex_1_energy_euler_vs_leapfrog.png", size::Tuple{Int,Int}=(400, 400))
+
+"""
+    plot_euler_leapfrog_energy(tvals::AbstractVector, energy_euler::AbstractVector, energy_leapfrog::AbstractVector; output::String="plots/ex_1_energy_euler_vs_leapfrog.png", size::Tuple{Int,Int}=(400, 400))
+
+Plot energy comparison between Euler and Leapfrog integration methods.
+
+# Arguments
+- `tvals::AbstractVector`: Time values
+- `energy_euler::AbstractVector`: Energy values from Euler method
+- `energy_leapfrog::AbstractVector`: Energy values from Leapfrog method
+- `output::String`: Output file path (default: "plots/ex_1_energy_euler_vs_leapfrog.png")
+- `size::Tuple{Int,Int}`: Plot size in pixels (default: (400, 400))
+
+# Returns
+- `Plots.Plot`: The generated energy comparison plot
+"""
+function plot_euler_leapfrog_energy(tvals::Vector, energy_euler::Vector, energy_leapfrog::Vector; output::String="plots/ex_1_energy_euler_vs_leapfrog.png", size::Tuple{Int,Int}=(400, 400))
     p_energy = plot(
         tvals,
         energy_euler,

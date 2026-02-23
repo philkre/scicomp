@@ -24,6 +24,23 @@ do_ass_2 = true
 do_ass_3 = true
 
 
+"""
+    parse_commandline()::Dict{String,Any}
+
+Parse command-line arguments for controlling assignment execution.
+
+# Available flags:
+- `--bench`, `-b`: Execute benchmarking
+- `--gif`, `-g`: Create GIFs
+- `--cache`, `-c`: Use caching
+- `-p`: Output directory for plots (default: "plots/ass_1/")
+- `--ass1`: Execute only Assignment 2.1
+- `--ass2`: Execute only Assignment 2.2
+- `--ass3`: Execute only Assignment 2.3
+
+# Returns
+- `Dict{String,Any}`: Dictionary with parsed argument values
+"""
 function parse_commandline()::Dict{String,Any}
     s = ArgParseSettings()
 
