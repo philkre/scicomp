@@ -1,22 +1,27 @@
 module Assignment_1_6
 
-# Benchmarking
-include("helpers/benchmark.jl")
-
-# Diffusion helpers
-include("helpers/diffusion.jl")
-
 # Utilities
+using Distributed
 using LaTeXStrings
 using ProgressMeter
-using Statistics
+using Plots
+# Contour plot only works properly when using Matplotlib backend
+pythonplot()
+
+# Import local module
+include("../helpers/__init__.jl")
+
+# Benchmarking
+using .Helpers.Benchmark: bench_funcs
+
+# Diffusion helpers
+using .Helpers.Diffusion: c_next_jacobi, c_next_gauss_seidel!, c_next_SOR!, delta, solve_until_tol, analytical_sol, get_iteration_count_SOR, c_next_SOR_sink!, c_next_SOR_sink_insulate!
 
 # Plotting
-include("helpers/savefig.jl")
-include("helpers/overlay.jl")
-include("helpers/heatmap_kwargs.jl")
-using Plots
-pythonplot()
+using .Helpers.SaveFig: savefig_auto_folder
+using .Helpers: overlay_image!
+using .Helpers: get_heatmap_kwargs
+
 
 
 function solution_at_k(solver::Function, k::Int64, c::Matrix{Float64}, args...; kwargs...)
@@ -27,7 +32,7 @@ function solution_at_k(solver::Function, k::Int64, c::Matrix{Float64}, args...; 
 end
 
 
-function plot_solutions_at_k(solvers::Vector{Function}, labels::Vector{String}, c_0::Matrix{Float64}, k::Int64, args...; D::Float64, L::Float64, N::Int64, kwargs...)
+function plot_solutions_at_k(solvers::Vector{Function}, labels::Vector{String}, c_0::Matrix{Float64}, k::Int64, args...; D::Float64, L::Float64, N::Int64, plot_output_dir::String="plots", kwargs...)
     plot(analytical_sol(1.0, D, L, N), title=L"Solution at $k_i= %$k$", xlabel="y", ylabel="c(y)", linestyle=:dot, label="Analytical", dpi=300)
 
     for (solver, label) in zip(solvers, labels)
@@ -35,12 +40,12 @@ function plot_solutions_at_k(solvers::Vector{Function}, labels::Vector{String}, 
         plot!(c[1, :], label=label)
     end
 
-    _savefig("plots/diffusion_y_axis_k_$k.png")
+    savefig_auto_folder(joinpath(plot_output_dir, "diffusion_y_axis_k_$k.png"))
 end
 
 
 function plot_error_at_convergence(solvers::Vector{Function}, labels::Vector{String}, c_0::Matrix{Float64}, args...; D::Float64, L::Float64, N::Int64,
-    tol::Float64=1e-6, i_max::Int64=10000, kwargs...)
+    tol::Float64=1e-6, i_max::Int64=10000, plot_output_dir::String="plots", kwargs...)
     anal = analytical_sol(1.0, D, L, N)
 
     plot(title="Error at convergence", xlabel="y", ylabel="Error")
@@ -49,11 +54,11 @@ function plot_error_at_convergence(solvers::Vector{Function}, labels::Vector{Str
         plot!(abs.(c[1, :] .- anal), label=label)
     end
 
-    _savefig("plots/diffusion_error_y_axis.png")
+    savefig_auto_folder(joinpath(plot_output_dir, "diffusion_error_y_axis.png"))
 end
 
 
-function get_deltas_equal_iterations(c_0::Matrix{Float64}; tol::Float64=1e-6, omegas::Vector{Float64}=[1.99, 1.93, 1.85])
+function get_deltas_equal_iterations(c_0::Matrix{Float64}; tol::Float64=1e-6, omegas::Vector{Float64}=[1.99, 1.93, 1.85], plot_output_dir::String="plots")
     # Check omegas has 3 values
     @assert length(omegas) == 3 "Omegas vector must have 3 values, got $(length(omegas))"
 
@@ -108,7 +113,7 @@ function get_deltas_equal_iterations(c_0::Matrix{Float64}; tol::Float64=1e-6, om
 end
 
 
-function plot_deltas_equal_iterations(c_0::Matrix{Float64}; tol::Float64=1e-6, omegas::Vector{Float64}=[1.99, 1.93, 1.85])
+function plot_deltas_equal_iterations(c_0::Matrix{Float64}; tol::Float64=1e-6, omegas::Vector{Float64}=[1.99, 1.93, 1.85], plot_output_dir::String="plots")
     deltas_JACOBI, deltas_GAUSS_SEIDEL, deltas_SOR_1, deltas_SOR_2, deltas_SOR_3 = get_deltas_equal_iterations(c_0; tol=tol, omegas=omegas)
 
 
@@ -122,11 +127,11 @@ function plot_deltas_equal_iterations(c_0::Matrix{Float64}; tol::Float64=1e-6, o
 
     hline!([tol], linestyle=:dot, label=L"\delta = %$tol")
 
-    _savefig("plots/diffusion_deltas_equal_iterations.png")
+    savefig_auto_folder(joinpath(plot_output_dir, "diffusion_deltas_equal_iterations.png"))
 end
 
 
-function plot_optimal_omega(c_0::Matrix{Float64}; tol::Float64=1e-6, omegas_stage_1=1.5:0.05:1.90, omegas_stage_2=1.90:0.0001:1.99)
+function plot_optimal_omega(c_0::Matrix{Float64}; tol::Float64=1e-6, omegas_stage_1=1.5:0.05:1.90, omegas_stage_2=1.90:0.0001:1.99, plot_output_dir::String="plots")
     omegas = vcat(omegas_stage_1, omegas_stage_2)
 
     k_converge_stage_1 = [get_iteration_count_SOR(c_0, omega, tol) for omega in omegas_stage_1]
@@ -139,11 +144,11 @@ function plot_optimal_omega(c_0::Matrix{Float64}; tol::Float64=1e-6, omegas_stag
     optimal_omega = omegas[findfirst(==(k_min), k_converge)]
 
     vline!(plot_omega, [optimal_omega], linestyle=:dot, label=L"\omega_{opt} = %$optimal_omega")
-    _savefig("plots/sor_optimal_omega.png")
+    savefig_auto_folder(joinpath(plot_output_dir, "sor_optimal_omega.png"))
 end
 
 
-function plot_omega_vs_N(; tol::Float64=1e-6, omegas=0.5:0.1:1.5, N_values=5:5:100, contour_levels=[150, 600, 2000, 4500, 9000, 15000, 22000, 30000, 42000, 52000])
+function plot_omega_vs_N(; tol::Float64=1e-6, omegas=0.5:0.1:1.5, N_values=5:5:100, contour_levels=[150, 600, 2000, 4500, 9000, 15000, 22000, 30000, 42000, 52000], plot_output_dir::String="plots")
     n = length(N_values)
     prog = Progress(n, 1, "Calculating iteration counts for contour plot...")
 
@@ -175,7 +180,7 @@ function plot_omega_vs_N(; tol::Float64=1e-6, omegas=0.5:0.1:1.5, N_values=5:5:1
         clabels=true, cbar=false, lw=1, xlabel="N", ylabel=L"\omega", title="SOR Iteration Count vs N and Omega",
         dpi=300)
 
-    _savefig("plots/sor_omega_vs_N.png")
+    savefig_auto_folder(joinpath(plot_output_dir, "sor_omega_vs_N.png"))
 end
 
 
@@ -212,7 +217,7 @@ function get_masks(N::Int64)::Tuple{Vector{Matrix{Bool}},Vector{String}}
 end
 
 
-function plot_masks(masks::Vector{Matrix{Bool}}, labels::Vector{String}; N::Int64=50, L::Float64=1.0)
+function plot_masks(masks::Vector{Matrix{Bool}}, labels::Vector{String}; N::Int64=50, L::Float64=1.0, plot_output_dir::String="plots")
     plots = []
     heatmap_kwargs = get_heatmap_kwargs(N, L)
 
@@ -222,11 +227,11 @@ function plot_masks(masks::Vector{Matrix{Bool}}, labels::Vector{String}; N::Int6
 
     plot(plots..., layout=(2, 3), size=(1200, 800), dpi=300, suptitle="Masks for diffusion simulation")
 
-    _savefig("plots/diffusion_masks.png")
+    savefig_auto_folder(joinpath(plot_output_dir, "diffusion_masks.png"))
 end
 
 
-function plot_sink_simulations(c_0::Matrix{Float64}, masks::Vector{Matrix{Bool}}, labels::Vector{String}; N::Int64=50, L::Float64=1.0, tol::Float64=1e-6, omega_sor::Float64=1.9, i_max::Int64=10_000, output::String="plots/diffusion_sinks.png")
+function plot_sink_simulations(c_0::Matrix{Float64}, masks::Vector{Matrix{Bool}}, labels::Vector{String}; N::Int64=50, L::Float64=1.0, tol::Float64=1e-6, omega_sor::Float64=1.9, i_max::Int64=10_000, plot_output_dir::String="plots")
     x = range(0, stop=L, length=N)
     y = range(0, stop=L, length=N)
 
@@ -267,16 +272,16 @@ function plot_sink_simulations(c_0::Matrix{Float64}, masks::Vector{Matrix{Bool}}
 
     # Pass 2: overlay sink images on the final grid plot.
     for (i, mask) in enumerate(masks)
-        _overlay_image!(p_all, x, y, mask; subplot_idx=i, image_path="input/sink", scale=0.12)
+        overlay_image!(p_all, x, y, mask; subplot_idx=i, image_path="src/ass_1/input/sink", scale=0.12)
     end
 
-    output_path = _savefig(p_all, output)
+    output_path = savefig_auto_folder(p_all, joinpath(plot_output_dir, "diffusion_sinks.png"))
     @info "Saved sink simulation plot" output_path
     return output_path
 end
 
 
-function plot_iteration_count_sinks(c_0::Matrix{Float64}, omegas::Vector{Float64}, masks::Vector{Matrix{Bool}}, labels::Vector{String}; N::Int64=50, tol::Float64=1e-6, i_max::Int64=10_000)
+function plot_iteration_count_sinks(c_0::Matrix{Float64}, omegas::Vector{Float64}, masks::Vector{Matrix{Bool}}, labels::Vector{String}; N::Int64=50, tol::Float64=1e-6, i_max::Int64=10_000, plot_output_dir::String="plots")
     # Start plot
     plot(title="SOR Iteration Count vs Omega", xlabel=L"\omega", ylabel="Iteration Count", label=L"k_{converge}", dpi=300)
 
@@ -287,11 +292,11 @@ function plot_iteration_count_sinks(c_0::Matrix{Float64}, omegas::Vector{Float64
         plot!(omegas, k_converge, label=label)
     end
 
-    _savefig("plots/sor_omega_sinks.png")
+    savefig_auto_folder(joinpath(plot_output_dir, "sor_omega_sinks.png"))
 end
 
 
-function plot_simulation_insulators(c_0::Matrix{Float64}, masks::Vector{Matrix{Bool}}, labels::Vector{String}; N::Int64=50, L::Float64=1.0, omega::Float64=1.85, tol::Float64=1e-6, i_max::Int64=10_000, output::String="plots/diffusion_insulators.png")
+function plot_simulation_insulators(c_0::Matrix{Float64}, masks::Vector{Matrix{Bool}}, labels::Vector{String}; N::Int64=50, L::Float64=1.0, omega::Float64=1.85, tol::Float64=1e-6, i_max::Int64=10_000, plot_output_dir::String="plots")
     x = range(0, stop=L, length=N)
     y = range(0, stop=L, length=N)
 
@@ -335,17 +340,17 @@ function plot_simulation_insulators(c_0::Matrix{Float64}, masks::Vector{Matrix{B
 
     # Pass 2: overlay sink image on final grid.
     for (i, mask) in enumerate(masks)
-        _overlay_image!(p_all, x, y, mask; subplot_idx=i, image_path="input/isolator", scale=0.1)
+        overlay_image!(p_all, x, y, mask; subplot_idx=i, image_path="src/ass_1/input/isolator", scale=0.1)
     end
 
-    output_path = _savefig(p_all, output)
+    output_path = savefig_auto_folder(p_all, joinpath(plot_output_dir, "diffusion_insulators.png"))
     @info "Saved insulator simulation plot" output_path
     return output_path
 end
 
 
 
-function main(; do_bench=false)
+function main(; do_bench=false, plot_output_dir::String="plots")
     if do_bench
         # Setup for benchmarking
         N = 50
@@ -370,23 +375,23 @@ function main(; do_bench=false)
 
     # Plot solution at k iterations for all methods
     @info "Plotting solutions at k=$k iterations..."
-    plot_solutions_at_k([c_next_jacobi, c_next_gauss_seidel!, c_next_SOR!], ["Jacobi", "Gauss-Seidel", "SOR"], c_0, k; D=D, L=L, N=N)
+    plot_solutions_at_k([c_next_jacobi, c_next_gauss_seidel!, c_next_SOR!], ["Jacobi", "Gauss-Seidel", "SOR"], c_0, k; D=D, L=L, N=N, plot_output_dir=plot_output_dir)
 
     # Plot error at convergence for all methods
     @info "Plotting error at convergence..."
-    plot_error_at_convergence([c_next_jacobi, c_next_gauss_seidel!, c_next_SOR!], ["Jacobi", "Gauss-Seidel", "SOR"], c_0; D=D, L=L, N=N, tol=tol)
+    plot_error_at_convergence([c_next_jacobi, c_next_gauss_seidel!, c_next_SOR!], ["Jacobi", "Gauss-Seidel", "SOR"], c_0; D=D, L=L, N=N, tol=tol, plot_output_dir=plot_output_dir)
 
     # Plot deltas until for equal max iterations
     @info "Plotting deltas for equal max iterations..."
-    plot_deltas_equal_iterations(c_0; tol=tol, omegas=omegas_test)
+    plot_deltas_equal_iterations(c_0; tol=tol, omegas=omegas_test, plot_output_dir=plot_output_dir)
 
     # Plot optimal omega
     @info "Plotting optimal omega..."
-    @time "Optimal omega found" plot_optimal_omega(c_0; tol=tol, omegas_stage_1=1.5:0.05:1.90, omegas_stage_2=1.90:0.0001:1.99)
+    @time "Optimal omega found" plot_optimal_omega(c_0; tol=tol, omegas_stage_1=1.5:0.05:1.90, omegas_stage_2=1.90:0.0001:1.99, plot_output_dir=plot_output_dir)
 
     # Plot effect of grid size on iteration count for different omegas
     @info "Plotting effect of grid size on iteration count for different omegas..."
-    @time "Plotted effect of grid size on iteration count for different omegas" plot_omega_vs_N()
+    @time "Plotted effect of grid size on iteration count for different omegas" plot_omega_vs_N(plot_output_dir=plot_output_dir)
 
     # Generate masks for diffusion simulation
     @info "Generating masks..."
@@ -394,19 +399,19 @@ function main(; do_bench=false)
 
     # Plot masks
     @info "Plotting masks..."
-    plot_masks(masks, labels; N=N, L=L)
+    plot_masks(masks, labels; N=N, L=L, plot_output_dir=plot_output_dir)
 
     # Plot sink simulations
     @info "Plotting sink simulations..."
-    plot_sink_simulations(c_0, masks, labels; N=N, L=L, tol=tol, omega_sor=omegas_test[3], i_max=10_000)
+    plot_sink_simulations(c_0, masks, labels; N=N, L=L, tol=tol, omega_sor=omegas_test[3], i_max=10_000, plot_output_dir=plot_output_dir)
 
     # Plot iteration count for different omegas with sinks
     @info "Plotting iteration count for different omegas with sinks..."
-    plot_iteration_count_sinks(c_0, omegas_sinks, masks, labels; N=N, tol=tol, i_max=10_000)
+    plot_iteration_count_sinks(c_0, omegas_sinks, masks, labels; N=N, tol=tol, i_max=10_000, plot_output_dir=plot_output_dir)
 
     # Plot Simulation with insulators
     @info "Plotting simulation with insulators..."
-    plot_simulation_insulators(c_0, masks, labels; N=N, L=L, omega=omegas_test[3], tol=tol, i_max=10_000)
+    plot_simulation_insulators(c_0, masks, labels; N=N, L=L, omega=omegas_test[3], tol=tol, i_max=10_000, plot_output_dir=plot_output_dir)
 end
 
 end

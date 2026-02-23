@@ -1,3 +1,5 @@
+module Benchmark
+
 using BenchmarkTools
 
 function bench_funcs(funcs::Vector{Function}, args...; kwargs...)::Nothing
@@ -7,3 +9,5 @@ function bench_funcs(funcs::Vector{Function}, args...; kwargs...)::Nothing
         print("\n\n")
     end
 end
+
+end # module

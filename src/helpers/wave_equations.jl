@@ -1,3 +1,5 @@
+module WaveEquations
+
 using Distributed
 @everywhere using SharedArrays
 @everywhere using LoopVectorization
@@ -394,3 +396,5 @@ function energy_shifted_from_solution(psis::Matrix{Float64}; c::Float64, L::Floa
     end
     return shifted
 end
+
+end # module

@@ -1,9 +1,12 @@
+module PlotWave
+
 using Distributed
 using Plots
 using LaTeXStrings
 using Statistics
 
 include("savefig.jl")
+using .SaveFig: resolve_output_path, auto_mkpath
 
 function get_wave_plots(t_f::Float64, t_0::Float64, dt::Float64, L::Float64, N::Int, solution_1::Matrix, solution_2::Matrix, solution_3::Matrix)::Vector{Plots.Plot{Plots.GRBackend}}
     x = range(0, L, length=N)
@@ -30,8 +33,8 @@ function plot_wave_multi(psis::AbstractMatrix, x::AbstractVector, title_text::St
     xlabel!(p, "x")
     ylabel!(p, "Psi")
     title!(p, title_text)
-    output_path = _resolve_output_path(output)
-    mkpath(dirname(output_path))
+    output_path = resolve_output_path(output)
+    auto_mkpath(dirname(output_path))
     savefig(p, output_path)
     return p
 end
@@ -49,8 +52,10 @@ function plot_euler_leapfrog_energy(tvals::AbstractVector, energy_euler::Abstrac
     )
     plot!(p_energy, tvals, fill(mean(energy_euler), length(tvals)), linestyle=:dash, color=:blue, label="Euler mean")
     plot!(p_energy, tvals, energy_leapfrog, label="Leapfrog", color=:red)
-    output_path = _resolve_output_path(output)
-    mkpath(dirname(output_path))
+    output_path = resolve_output_path(output)
+    auto_mkpath(dirname(output_path))
     savefig(p_energy, output_path)
     return p_energy
 end
+
+end # module

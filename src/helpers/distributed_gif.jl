@@ -1,3 +1,5 @@
+module DistributedGIF
+
 using Distributed
 using ProgressMeter
 @everywhere using Plots
@@ -6,41 +8,43 @@ using ProgressMeter
 end
 using FFMPEG
 
+include("savefig.jl")
+using .SaveFig: auto_mkpath
 
 """
-    gif_slow(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String; fps::Int64=30)
+    gif_slow(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifpath::String; fps::Int64=30)
 
 Create an animated GIF from a vector of plots using Plots.jl's built-in animation.
 
 # Arguments
 - `plots::Vector{Plots.Plot{Plots.GRBackend}}`: Vector of plot objects to animate
-- `gifname::String`: Output filename for the GIF
+- `gifpath::String`: Output filename for the GIF
 - `fps::Int64`: Frames per second (default: 30)
 
 # Notes
 This is a simple but slower method compared to `distributed_gif`. 
 Uses Plots.jl's Animation framework.
 """
-function gif_slow(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String; fps::Int64=30)
+function gif_slow(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifpath::String; fps::Int64=30)
     # Animate the solution and save frames
-    mkpath(dirname(gifname))
+    auto_mkpath(gifpath)  # Ensure output directory exists
 
     anim = Animation()
     @showprogress "Creating GIF frames..." for p in plots
         frame(anim, p)
     end
-    gif(anim, gifname, fps=fps)
+    gif(anim, gifpath, fps=fps)
 end
 
 
 """
-    distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String; fps::Int64=30, do_palette=false, width=600)
+    distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifpath::String; fps::Int64=30, do_palette=false, width=600)
 
 Create an animated GIF from a vector of plots using distributed computing and FFMPEG.
 
 # Arguments
 - `plots::Vector{Plots.Plot{Plots.GRBackend}}`: Vector of plot objects to animate
-- `gifname::String`: Output filename for the GIF
+- `gifpath::String`: Output filename for the GIF
 - `fps::Int64`: Frames per second (default: 30)
 - `do_palette::Bool`: Whether to generate and use a custom color palette for better quality (default: false)
 - `width::Int`: Width of the output GIF in pixels (default: 600)
@@ -52,8 +56,8 @@ Create an animated GIF from a vector of plots using distributed computing and FF
 - With `do_palette=true`, generates an optimized palette for better color reproduction
 - Uses videotoolbox hardware acceleration on macOS when available
 """
-function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::String; fps::Int64=30, do_palette=false, width=600)
-    mkpath(dirname(gifname))
+function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifpath::String; fps::Int64=30, do_palette=false, width=600)
+    auto_mkpath(gifpath)  # Ensure output directory exists
 
     # Create a temporary directory to store frames
     tmp_dirname = "tmp_gif" * string(rand(1:10000))  # Generate a unique temporary directory name
@@ -95,7 +99,7 @@ function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::St
         run(`$(FFMPEG.ffmpeg) -framerate $fps 
             -i $frame_pattern
             -i $palette_path
-            -y $gifname
+            -y $gifpath
             -hwaccel videotoolbox
             -vf "fps=$fps,scale=$width:-1:flags=fast_bilinear" 
             -filter_complex "fps=$fps,scale=$width:-1:flags=lanczos[x];[x][1:v]paletteuse" 
@@ -107,7 +111,7 @@ function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::St
             -i $frame_pattern
             -vf "fps=$fps,scale=$width:-1:flags=fast_bilinear" 
             -gifflags -transdiff           
-            -y $gifname`)
+            -y $gifpath`)
     end
 
     # Clean up temporary files
@@ -115,8 +119,10 @@ function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifname::St
 
     # Detect if we are running in a Jupyter notebook and display the GIF
     if Base.invokelatest(isdefined, Main, :IJulia) && Main.IJulia.inited
-        display("image/png", read(gifname))
+        display("image/png", read(gifpath))
     else
-        println("GIF created successfully: $gifname")
+        println("GIF created successfully: $gifpath")
     end
 end
+
+end # module

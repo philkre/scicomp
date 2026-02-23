@@ -1,10 +1,14 @@
-function _overlay_image!(
+using FileIO: load
+using Plots: Colorant, alpha, red, green, blue, plot!
+using Statistics: mean
+
+function overlay_image!(
     p,
     x::AbstractVector{<:Real},
     y::AbstractVector{<:Real},
     sink_mask::AbstractMatrix{Bool};
     subplot_idx::Int=1,
-    image_path::String="input/sink",
+    image_path::String="src/ass_1/input/sink",
     scale::Float64=0.55,
 )
     candidates = splitext(image_path)[2] == "" ? [image_path * ".png", image_path] : [image_path]

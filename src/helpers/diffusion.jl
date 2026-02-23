@@ -1,3 +1,5 @@
+module Diffusion
+
 using Distributed
 @everywhere using LoopVectorization
 using SpecialFunctions
@@ -567,3 +569,5 @@ function c_next_SOR_sink_insulate!(c::Matrix{Float64}, omega::Float64; sink_mask
 
     return c
 end
+
+end # module

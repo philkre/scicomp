@@ -1,21 +1,24 @@
 module Assignment_1_2
 
-# Benchmarking
-include("helpers/benchmark.jl")
-
-# Diffusion helpers
-include("helpers/diffusion.jl")
-
 # Utilities
 using JLD2
 using Printf
 using LaTeXStrings
+using Plots
+
+# Import local module
+include("../helpers/__init__.jl")
+
+# Benchmarking
+using .Helpers.Benchmark: bench_funcs
+
+# Diffusion helpers
+using .Helpers.Diffusion: propagate_c_diffusion, analytical_sol
 
 # Plotting
-using Plots
-include("helpers/distributed_gif.jl")
-include("helpers/heatmap_kwargs.jl")
-include("helpers/savefig.jl")
+using .Helpers.DistributedGIF: gif_slow, distributed_gif
+using .Helpers: get_heatmap_kwargs
+using .Helpers.SaveFig: savefig_auto_folder
 
 function get_c_intervals(c0::Matrix{Float64}, intervals::Vector{Float64}; L::Float64, N::Int64, D::Float64, dt::Float64, t_0::Float64=0.0)::Vector{Matrix{Float64}}
     c = c0
@@ -31,7 +34,7 @@ function get_c_intervals(c0::Matrix{Float64}, intervals::Vector{Float64}; L::Flo
 end
 
 
-function plot_intervals(c0::Matrix, intervals::Vector{Float64}, results::Vector{Matrix{Float64}}; L::Float64, N::Int64, t_0::Float64=0.0)
+function plot_intervals(c0::Matrix, intervals::Vector{Float64}, results::Vector{Matrix{Float64}}; L::Float64, N::Int64, t_0::Float64=0.0, plot_output_dir::String="plots")
     # Plot concentration along y-axis at x=0 for all time intervals
     y = range(0, stop=L, length=size(c0, 2))
     p = plot(xlims=(0, L), dpi=300)
@@ -40,12 +43,12 @@ function plot_intervals(c0::Matrix, intervals::Vector{Float64}, results::Vector{
     end
     xlabel!(p, L"y")
     ylabel!(p, L"c(y)")
-    _savefig(p, "plots/diffusion_yprofile.png")
+    savefig_auto_folder(p, joinpath(plot_output_dir, "diffusion_yprofile.png"))
     return p
 end
 
 
-function add_analytical_plot!(plt::Plots.Plot{Plots.GRBackend}, intervals::Vector{Float64}, analytical_sol::Function; D::Float64, L::Float64, N::Int64)
+function add_analytical_plot!(plt::Plots.Plot{Plots.GRBackend}, intervals::Vector{Float64}, analytical_sol::Function; D::Float64, L::Float64, N::Int64, plot_output_dir::String="plots")
     y = range(0, stop=L, length=N)
 
     # Match each analytical curve to the corresponding numerical curve colour.
@@ -65,22 +68,22 @@ function add_analytical_plot!(plt::Plots.Plot{Plots.GRBackend}, intervals::Vecto
         end
     end
 
-    _savefig(plt, "plots/diffusion_yprofile_analytical.png")
+    savefig_auto_folder(plt, joinpath(plot_output_dir, "diffusion_yprofile_analytical.png"))
     return plt
 end
 
-function plot_heatmaps(intervals::Vector{Float64}, results::Vector{Matrix{Float64}}; L::Float64, N::Int64)
+function plot_heatmaps(intervals::Vector{Float64}, results::Vector{Matrix{Float64}}; L::Float64, N::Int64, plot_output_dir::String="plots")
     plots = []
     heatmap_kwargs = get_heatmap_kwargs(N, L)
     for (t_end, c) in zip(intervals, results)
         push!(plots, heatmap(c'; title="t = $(t_end)", heatmap_kwargs...))
     end
     plot(plots..., layout=(2, 2), size=(800, 800), dpi=300, suptitle="Diffusion process at different time points")
-    _savefig("plots/diffusion_heatmaps.png")
+    savefig_auto_folder(joinpath(plot_output_dir, "diffusion_heatmaps.png"))
 end
 
 
-function animate_diffusion(c_0::Matrix{Float64}; L::Float64, N::Int64, D::Float64, dt::Float64)
+function animate_diffusion(c_0::Matrix{Float64}; L::Float64, N::Int64, D::Float64, dt::Float64, plot_output_dir::String="plots")
     heatmap_kwargs = get_heatmap_kwargs(N, L)
 
     plots = (() -> begin
@@ -101,10 +104,10 @@ function animate_diffusion(c_0::Matrix{Float64}; L::Float64, N::Int64, D::Float6
         frames
     end)()
 
-    gif_slow(plots, _resolve_output_path("plots/diffusion_evolution.gif"), fps=30)
+    gif_slow(plots, joinpath(plot_output_dir, "diffusion_evolution.gif"), fps=30)
 end
 
-function plot_analytical_difference(c0::Matrix{Float64}, intervals::Vector{Float64}, results::Vector{Matrix{Float64}}, analytical_sol::Function; L::Float64, N::Int64, D::Float64)
+function plot_analytical_difference(c0::Matrix{Float64}, intervals::Vector{Float64}, results::Vector{Matrix{Float64}}, analytical_sol::Function; L::Float64, N::Int64, D::Float64, plot_output_dir::String="plots")
     y = range(0, stop=L, length=size(c0, 2))
     plot(legend=true, xlims=(0, L), dpi=300)
     for (t_end, c) in zip(intervals, results)
@@ -115,11 +118,11 @@ function plot_analytical_difference(c0::Matrix{Float64}, intervals::Vector{Float
 
     xlabel!(L"y")
     ylabel!(L"\delta c(y)")
-    _savefig("plots/diffusion_difference.png")
+    savefig_auto_folder(joinpath(plot_output_dir, "diffusion_difference.png"))
     return current()
 end
 
-function main(; do_bench::Bool=false, do_cache::Bool=false, do_gif::Bool=false)
+function main(; do_bench::Bool=false, do_cache::Bool=false, do_gif::Bool=false, plot_output_dir::String="plots")
     if do_bench
         # Setup for benchmarking
         N = 100
@@ -157,19 +160,19 @@ function main(; do_bench::Bool=false, do_cache::Bool=false, do_gif::Bool=false)
 
     # Plot y-profile
     @info "Plotting y-profile results..."
-    plt_intervals = plot_intervals(c_0, t_intervals, results; L=L, N=N, t_0=t_0)
-    add_analytical_plot!(plt_intervals, t_intervals, analytical_sol; D=D, L=L, N=N)
+    plt_intervals = plot_intervals(c_0, t_intervals, results; L=L, N=N, t_0=t_0, plot_output_dir=plot_output_dir)
+    add_analytical_plot!(plt_intervals, t_intervals, analytical_sol; D=D, L=L, N=N, plot_output_dir=plot_output_dir)
 
-    plot_analytical_difference(c_0, t_intervals, results, analytical_sol; L=L, N=N, D=D)
+    plot_analytical_difference(c_0, t_intervals, results, analytical_sol; L=L, N=N, D=D, plot_output_dir=plot_output_dir)
 
     # Plot heatmaps for each interval
     @info "Plotting heatmaps for each interval..."
-    plot_heatmaps(t_intervals, results; L=L, N=N)
+    plot_heatmaps(t_intervals, results; L=L, N=N, plot_output_dir=plot_output_dir)
 
     if do_gif
         # Animate diffusion process
         @info "Animating diffusion process..."
-        @time "Saved animated diffusion process" animate_diffusion(c_0; L=L, N=N, D=D, dt=dt)
+        @time "Saved animated diffusion process" animate_diffusion(c_0; L=L, N=N, D=D, dt=dt, plot_output_dir=plot_output_dir)
     end
 end
 
