@@ -17,6 +17,7 @@ do_cache::Bool = false
 "Output directory for plots"
 plot_output_dir = "plots/ass_1/"
 
+
 function parse_commandline()::Dict{String,Any}
     s = ArgParseSettings()
 
@@ -42,9 +43,9 @@ function parse_commandline()::Dict{String,Any}
 end
 
 
-if abspath(PROGRAM_FILE) == @__FILE__
+if ((abspath(PROGRAM_FILE) == @__FILE__) || !isempty(PROGRAM_FILE)) && !isinteractive()
     # Parse arguments using ArgParse
-    @info args = parse_commandline()
+    args = parse_commandline()
 
 
     # Add workers for distributed computing
