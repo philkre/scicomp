@@ -15,14 +15,13 @@ do_gif::Bool = false
 do_cache::Bool = false
 
 "Output directory for plots"
-plot_output_dir = "plots/ass_2/"
+plot_output_dir = "plots"
 
 
 # Do assignments (default behavior)
 do_ass_1 = true
 do_ass_2 = false
 do_ass_3 = false
-
 
 """
     parse_commandline()::Dict{String,Any}
@@ -82,8 +81,8 @@ function parse_commandline()::Dict{String,Any}
     return parse_args(s)
 end
 
-
-if ((abspath(PROGRAM_FILE) == @__FILE__) || !isempty(PROGRAM_FILE)) && !isinteractive()
+abspath(PROGRAM_FILE) == @__FILE__
+if (abspath(PROGRAM_FILE) == @__FILE__) || (!isinteractive())
     # Parse arguments using ArgParse
     args = parse_commandline()
     do_bench = args["bench"]

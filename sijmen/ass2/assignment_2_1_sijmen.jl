@@ -10,6 +10,7 @@ end
 
 function main(; do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, plot_output_dir::String="plots/ass_2")
     print_test()
+    println("obama")
 end
 
 end # module

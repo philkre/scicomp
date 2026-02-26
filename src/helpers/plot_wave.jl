@@ -54,7 +54,7 @@ Plot multiple wave solutions at specified time indices.
 # Returns
 - `Plots.Plot`: The generated plot
 """
-function plot_wave_multi(psis::AtMatrix, x::Vector, title_text::String, ts_idx::Vector{<:Integer}; output::String="plots/ex_1_wave_multi.png")
+function plot_wave_multi(psis::AbstractMatrix, x::Vector, title_text::String, ts_idx::Vector{<:Integer}; output::String="plots/ex_1_wave_multi.png")
     p = plot(dpi=300, size=(400, 400))
     for t in ts_idx
         if t == 1
