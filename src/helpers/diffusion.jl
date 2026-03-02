@@ -511,19 +511,19 @@ Compute the maximum absolute difference between two concentration fields.
 # Returns
 - `Float64`: Maximum absolute difference (L∞ norm)
 """
-function delta(c_old::Matrix{Float64}, c_new::Matrix{Float64})
+function delta(c_old::Union{Matrix{Float64},MtlArray{Float32,2}}, c_new::Union{Matrix{Float64},MtlArray{Float32,2}})
     return maximum(abs.(c_new .- c_old))
 end
 
 
 """
-    stopping_condition(c_old::Matrix{Float64}, c_new::Matrix{Float64}, tol::Float64)
+    stopping_condition(c_old::Union{Matrix{Float64},MtlArray{Float32,2}}, c_new::Union{Matrix{Float64},MtlArray{Float32,2}}, tol::Float64)
 
 Check if the iterative solver has converged within tolerance.
 
 # Arguments
-- `c_old::Matrix{Float64}`: Previous concentration field
-- `c_new::Matrix{Float64}`: New concentration field
+- `c_old::Union{Matrix{Float64},MtlArray{Float32,2}}`: Previous concentration field
+- `c_new::Union{Matrix{Float64},MtlArray{Float32,2}}`: New concentration field
 - `tol::Float64`: Convergence tolerance
 
 # Returns
@@ -548,7 +548,7 @@ Solve the diffusion equation iteratively until convergence or maximum iterations
 - `quiet::Bool`: If true, suppress convergence messages (default: false)
 
 # Returns
-- `Tuple{Matrix{Float64}, Vector{Float64}}`: Final concentration field and convergence history
+- `Tuple{Union{Matrix{Float64},MtlArray{Float32,2}}, Vector{Float64}}`: Final concentration field and convergence history
 """
 function solve_until_tol(solver::Function, c_initial::Matrix{Float64}, tol::Float64, max_iters::Int, args_solver...; quiet::Bool=false, track_deltas::Bool=true, kwargs_solver...)::Union{Tuple{Matrix{Float64},Vector{Float64}},Matrix{Float64}}
     c_old = copy(c_initial)
