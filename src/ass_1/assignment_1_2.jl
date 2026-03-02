@@ -13,7 +13,7 @@ include("../helpers/__init__.jl")
 using .Helpers.Benchmark: bench_funcs
 
 # Diffusion helpers
-using .Helpers.Diffusion: propagate_c_diffusion, analytical_sol
+using .Helpers.Diffusion: propagate_c_diffusion, analytical_sol, c_next, c_next_single_loop, c_next_dist_turbo, c_next_dist
 
 # Plotting
 using .Helpers.DistributedGIF: gif_slow, distributed_gif

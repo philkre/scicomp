@@ -3,7 +3,7 @@ module Diffusion
 using Distributed
 @everywhere using LoopVectorization
 using SpecialFunctions
-
+using Metal
 
 """
     c_next(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)::Matrix{Float64}
@@ -361,25 +361,25 @@ Compute the maximum absolute difference between two concentration fields.
 # Returns
 - `Float64`: Maximum absolute difference (L∞ norm)
 """
-function delta(c_old::Matrix{Float64}, c_new::Matrix{Float64})
+function delta(c_old::Union{Matrix{Float64},MtlArray{Float32,2}}, c_new::Union{Matrix{Float64},MtlArray{Float32,2}})
     return maximum(abs.(c_new .- c_old))
 end
 
 
 """
-    stopping_condition(c_old::Matrix{Float64}, c_new::Matrix{Float64}, tol::Float64)
+    stopping_condition(c_old::Union{Matrix{Float64},MtlArray{Float32,2}}, c_new::Union{Matrix{Float64},MtlArray{Float32,2}}, tol::Float64)
 
 Check if the iterative solver has converged within tolerance.
 
 # Arguments
-- `c_old::Matrix{Float64}`: Previous concentration field
-- `c_new::Matrix{Float64}`: New concentration field
+- `c_old::Union{Matrix{Float64},MtlArray{Float32,2}}`: Previous concentration field
+- `c_new::Union{Matrix{Float64},MtlArray{Float32,2}}`: New concentration field
 - `tol::Float64`: Convergence tolerance
 
 # Returns
 - `Bool`: True if converged (maximum difference < tolerance)
 """
-function stopping_condition(c_old::Matrix{Float64}, c_new::Matrix{Float64}, tol::Float64)
+function stopping_condition(c_old::Union{Matrix{Float64},MtlArray{Float32,2}}, c_new::Union{Matrix{Float64},MtlArray{Float32,2}}, tol::Float64)
     return delta(c_old, c_new) < tol
 end
 
@@ -398,9 +398,9 @@ Solve the diffusion equation iteratively until convergence or maximum iterations
 - `quiet::Bool`: If true, suppress convergence messages (default: false)
 
 # Returns
-- `Tuple{Matrix{Float64}, Vector{Float64}}`: Final concentration field and convergence history
+- `Tuple{Union{Matrix{Float64},MtlArray{Float32,2}}, Vector{Float64}}`: Final concentration field and convergence history
 """
-function solve_until_tol(solver::Function, c_initial::Matrix{Float64}, tol::Float64, max_iters::Int, args_solver...; quiet::Bool=false, kwargs_solver...)::Tuple{Matrix{Float64},Vector{Float64}}
+function solve_until_tol(solver::Function, c_initial::Union{Matrix{Float64},MtlArray{Float32,2}}, tol::Float64, max_iters::Int, args_solver...; quiet::Bool=false, kwargs_solver...)::Tuple{Union{Matrix{Float64},MtlArray{Float32,2}},Vector{Float64}}
     c_old = copy(c_initial)
     c_new = copy(c_initial)
 
@@ -535,7 +535,7 @@ function c_next_SOR_sink_insulate!(c::Matrix{Float64}, omega::Float64; sink_mask
     do_sink = any(sink_mask)
     do_insulate = any(insulate_mask)
 
-    # # Apply sink mask
+    # Apply sink mask
     if do_sink
         c[sink_mask] .= 0.0
     end
