@@ -13,7 +13,7 @@ using .Helpers.Benchmark: bench_funcs
 
 
 # Diffusion helpers
-using .Helpers.Diffusion: solve_until_tol
+using .Helpers.Diffusion: solve_until_tol, c_next_SOR_sink!
 
 # Plotting
 using .Helpers.SaveFig: savefig_auto_folder
@@ -21,38 +21,6 @@ using .Helpers: get_heatmap_kwargs
 using .Helpers.DistributedGIF: gif_slow, distributed_gif
 
 
-function c_next_SOR_sink!(c::Matrix{Float64}, omega::Float64; sink_mask::Matrix{Bool}=zeros(Bool, size(c)))::Matrix{Float64}
-    N = size(c, 1)
-    Fo = 0.25 * omega
-
-    do_sink = any(sink_mask)
-
-    # # Apply sink mask
-    if do_sink
-        c[sink_mask] .= 0.0
-    end
-
-    @inbounds for i in 1:N
-        @inbounds for j in 2:N-1
-            # If this cell is a sink, set concentration to 0 and skip update
-            if do_sink && sink_mask[i, j]
-                continue
-            end
-
-            i_right = (i == N) ? 1 : i + 1
-            i_left = (i == 1) ? N : i - 1
-
-            c[i, j] = Fo * (
-                c[i_right, j] +
-                c[i_left, j] +
-                c[i, j+1] +
-                c[i, j-1]
-            ) + (1 - omega) * c[i, j]
-        end
-    end
-
-    return c
-end
 
 
 function c_next_SOR_sink_metal!(c::MtlArray{Float32,2}, omega::Float64; sink_mask::MtlArray{Bool,2}=MtlArray(zeros(Bool, size(c))))::MtlArray{Float32,2}
@@ -134,7 +102,7 @@ function diffusion_limited_aggregation_step(
         copyto!(cpu_c, c)
         copyto!(cpu_sink, c_sink)
     else
-        c, _deltas = solve_until_tol(c_next_SOR_sink!, c, tol, i_max_conv, omega_sor; sink_mask=c_sink, quiet=true)
+        c, _deltas = solve_until_tol(c_next_SOR_sink!, c, tol, i_max_conv, omega_sor, c_sink; quiet=true)
         cpu_c = c
         cpu_sink = c_sink
     end
@@ -224,7 +192,7 @@ function main(; use_GPU::Bool=false, do_bench::Bool=false, do_gif::Bool=false, d
         sink_mask = zeros(Bool, N, N)
         sink_mask[50, 1] = true
 
-        bench_funcs([c_next_SOR_sink!], c_0, omega, sink_mask=sink_mask)
+        bench_funcs([c_next_SOR_sink!], c_0, omega, sink_mask)
 
         if use_GPU
             c_0 = MtlArray(Matrix{Float32}(c_0))
