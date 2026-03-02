@@ -15,7 +15,7 @@ do_gif::Bool = false
 do_cache::Bool = false
 
 "Output directory for plots"
-plot_output_dir = "plots/ass_1/"
+plot_output_dir = "plots/ass_2/"
 
 
 # Do assignments (default behavior)
@@ -33,7 +33,7 @@ Parse command-line arguments for controlling assignment execution.
 - `--bench`, `-b`: Execute benchmarking
 - `--gif`, `-g`: Create GIFs
 - `--cache`, `-c`: Use caching
-- `-p`: Output directory for plots (default: "plots/ass_1/")
+- `-p`: Output directory for plots (default: "plots/ass_2/")
 - `--ass1`: Execute only Assignment 2.1
 - `--ass2`: Execute only Assignment 2.2
 - `--ass3`: Execute only Assignment 2.3
@@ -127,7 +127,7 @@ if ((abspath(PROGRAM_FILE) == @__FILE__) || !isempty(PROGRAM_FILE)) && !isintera
             @everywhere include("src/ass_2/assignment_2_1.jl")
             @everywhere using .Assignment_2_1: main as main_2_1
         end
-        @time "Assignment 2.1 completed" main_2_1(; do_bench=do_bench, do_gif=do_gif, do_cache=do_cache, plot_output_dir=plot_output_dir)
+        @time "Assignment 2.1 completed" main_2_1(; do_bench=do_bench, do_gif=do_gif, do_cache=do_cache, use_GPU=use_GPU, plot_output_dir=plot_output_dir)
     end
 
     # Assignment 2.2
