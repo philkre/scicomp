@@ -106,12 +106,8 @@ function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifpath::St
             -gifflags -transdiff
             `)
     else
-        run(`$(FFMPEG.ffmpeg) 
-            -hwaccel videotoolbox          
-            -i $frame_pattern
-            -vf "fps=$fps,scale=$width:-1:flags=fast_bilinear" 
-            -gifflags -transdiff           
-            -y $gifpath`)
+        ffmpeg = FFMPEG.ffmpeg
+        run(`$(ffmpeg()) -i $frame_pattern -vf fps=$fps,scale=$width:-1:flags=fast_bilinear -gifflags -transdiff -y $gifpath`)
     end
 
     # Clean up temporary files
