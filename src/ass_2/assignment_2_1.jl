@@ -21,7 +21,13 @@ using .Helpers: get_heatmap_kwargs
 using .Helpers.DistributedGIF: gif_slow, distributed_gif
 
 
-
+"""Get equilibrium concentration for initial condition"""
+function get_c_0_eq(N::Int)::Matrix{Float64}
+    c_0 = zeros(N, N)
+    c_y = range(0, stop=1, length=N)
+    c_0 .= c_y'  # Broadcast row vector to all rows
+    return c_0
+end
 
 function c_next_SOR_sink_metal!(c::MtlArray{Float32,2}, omega::Float64; sink_mask::MtlArray{Bool,2}=MtlArray(zeros(Bool, size(c))))::MtlArray{Float32,2}
     N = size(c, 1)
@@ -141,6 +147,7 @@ end
 
 function simulate_diffusion_limited_aggregation(N::Int, L::Float64, eta::Float64, tol::Float64, frames::Int; i_max_conv::Int=10_000, omega_sor::Float64, use_GPU::Bool=false, do_gif::Bool=false, plot_output_dir::String="plots/ass_2")
     # Instantiate starting conditions
+
     # Source
     c_source = zeros(Bool, N, N)
     c_source[:, end] .= 1
@@ -149,8 +156,9 @@ function simulate_diffusion_limited_aggregation(N::Int, L::Float64, eta::Float64
     # Single seed
     c_sink_template[50, 1] = true
     c_sink = use_GPU ? MtlArray(copy(c_sink_template)) : copy(c_sink_template)
-    # c_0
-    c = use_GPU ? MtlArray(Matrix{Float32}(c_source)) : Matrix{Float64}(c_source)
+    # Start with equilibrium solution of initial conditions
+    c_0_eq = get_c_0_eq(N)
+    c = use_GPU ? MtlArray(Matrix{Float32}(c_0_eq)) : Matrix{Float64}(c_0_eq)
     @info "Created initial conditions"
 
     plots = Vector{Plots.Plot{Plots.GRBackend}}(undef, frames)
@@ -177,7 +185,7 @@ function simulate_diffusion_limited_aggregation(N::Int, L::Float64, eta::Float64
     end
 
     if do_gif
-        gif_slow(plots, joinpath(plot_output_dir, "diffusion_limited_aggregation_N=$N.gif"), fps=60)
+        distributed_gif(plots, joinpath(plot_output_dir, "diffusion_limited_aggregation_N=$N.gif"); fps=60, do_palette=true, width=900)
     end
 end
 
@@ -208,6 +216,7 @@ function main(; use_GPU::Bool=false, do_bench::Bool=false, do_gif::Bool=false, d
     i_max = 10_000
     omega_sor = 1.85
     frames = 1000
+
     simulate_diffusion_limited_aggregation(N, L, eta, tol, frames; i_max_conv=i_max, omega_sor=omega_sor, use_GPU=use_GPU, do_gif
         =do_gif, plot_output_dir=plot_output_dir)
 
