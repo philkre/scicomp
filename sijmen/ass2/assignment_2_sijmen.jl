@@ -1,8 +1,5 @@
 using ArgParse
-using Distributed: @everywhere
-
-include("../../src/helpers/__init__.jl")
-using .Helpers.DistributedUtil: maximize_workers
+using Distributed
 
 # Globals
 "Do benchmarking (default behavior)"
@@ -101,7 +98,9 @@ if (abspath(PROGRAM_FILE) == @__FILE__) || (!isinteractive())
     end
 
     # Add workers for distributed computing
-    @time "Added workers" maximize_workers()
+    addprocs(4)
+    @info "Number of workers: " * string(nprocs()) * "\nNumber of CPU threads: " * string(Sys.CPU_THREADS) * "\n"
+    @everywhere sleep(0.1)
 
     # Assignment 2.1
     if do_ass_1
