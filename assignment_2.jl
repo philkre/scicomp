@@ -57,6 +57,14 @@ function parse_commandline()::Dict{String,Any}
         help = "use caching"
         action = :store_true
 
+        "--gpu"
+        help = "use GPU for computation. WARNING: This feature currently only supports Metal.jl on macOS."
+        action = :store_true
+
+        "--nprocs"
+        help = "number of processes for distributed computing"
+        arg_type = Int
+
         "-p"
         arg_type = String
         help = "Output directory for plots"
