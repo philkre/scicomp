@@ -2,7 +2,7 @@ using ArgParse
 using Distributed: @everywhere
 
 include("src/helpers/__init__.jl")
-using .Helpers.DistributedUtil: maximize_workers
+using .Helpers.DistributedUtil: set_procs, maximize_workers
 
 # Globals
 "Do benchmarking (default behavior)"
@@ -97,6 +97,8 @@ if ((abspath(PROGRAM_FILE) == @__FILE__) || !isempty(PROGRAM_FILE)) && !isintera
     do_bench = args["bench"]
     do_gif = args["gif"]
     do_cache = args["cache"]
+    use_GPU = args["gpu"]
+    nprocs = args["nprocs"]
     plot_output_dir = args["p"]
 
     # Only ignore default behavior if any of the assignment flags are set, otherwise run all assignments by default
@@ -110,7 +112,13 @@ if ((abspath(PROGRAM_FILE) == @__FILE__) || !isempty(PROGRAM_FILE)) && !isintera
     end
 
     # Add workers for distributed computing
-    @time "Added workers" maximize_workers()
+    @time "Added workers" begin
+        if (nprocs === nothing)
+            maximize_workers()
+        else
+            set_procs(nprocs)
+        end
+    end
 
     # Assignment 2.1
     if do_ass_1
