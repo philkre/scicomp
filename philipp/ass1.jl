@@ -176,7 +176,7 @@ function main_steadystate()
     end
 
     if SINKS
-        sink_indices = sink_builder(N, shape=:circle)
+        sink_indices = (N, shape=:circle)
 
         c_sink_jacobi, its_sink_jacobi, deltas_sink_jacobi = run_steadystate(copy(c), epsilon; method="jacobi", sink_indices=sink_indices)
         c_sink_gauss_seidel, its_sink_gauss_seidel, deltas_sink_gauss_seidel = run_steadystate(copy(c), epsilon; method="gauss-seidel", sink_indices=sink_indices)

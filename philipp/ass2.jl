@@ -49,11 +49,33 @@ function run_dla(
     init_pos = [ceil(N / 2), ceil(N / 2)]
     m[init_pos...] = 0.0
 
+    results = Dict("cs" => [], "masks" => [])
+
     for step in 1:steps
         # mask update with DLA rules
         update_mask!(c, m, nu)
-
         # diffusion step with new mask
         laplace_sor!(c; sink_indices=findall(m .== 0.0))
+        # store results for plotting
+
+        push!(results["cs"], copy(c))
+        push!(results["masks"], copy(m))
     end
+
+    return results
 end
+
+function main_dla()
+    N = 100
+    steps = 1000
+    nu = 0.6
+
+    results = run_dla(N, steps, nu)
+
+    plot_steddystate(results["cs"][end];
+        sink_indices=results["masks"][end],
+        filename="philipp/output/img/dla_concentration.png",
+        title="DLA Concentration")
+end
+
+main_dla()
