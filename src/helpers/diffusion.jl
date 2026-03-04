@@ -400,24 +400,34 @@ Solve the diffusion equation iteratively until convergence or maximum iterations
 # Returns
 - `Tuple{Union{Matrix{Float64},MtlArray{Float32,2}}, Vector{Float64}}`: Final concentration field and convergence history
 """
-function solve_until_tol(solver::Function, c_initial::Union{Matrix{Float64},MtlArray{Float32,2}}, tol::Float64, max_iters::Int, args_solver...; quiet::Bool=false, kwargs_solver...)::Tuple{Union{Matrix{Float64},MtlArray{Float32,2}},Vector{Float64}}
+function solve_until_tol(solver::Function, c_initial::Union{Matrix{Float64},MtlArray{Float32,2}}, tol::Float64, max_iters::Int, args_solver...; quiet::Bool=false, track_deltas::Bool=true, kwargs_solver...)::Tuple{Union{Matrix{Float64},MtlArray{Float32,2}},Vector{Float64}}
     c_old = copy(c_initial)
     c_new = copy(c_initial)
 
-    deltas = Float64[]
+    if track_deltas
+        deltas = Float64[]
+    end
 
     for iter in 1:max_iters
-        c_new = solver(c_new, args_solver...; kwargs_solver...)
-        push!(deltas, delta(c_old, c_new))
+        copyto!(c_new, solver(c_new, args_solver...; kwargs_solver...))
 
-        if stopping_condition(c_old, c_new, tol)
+        delta_curr = delta(c_old, c_new)
+        if track_deltas
+            push!(deltas, delta_curr)
+        end
+
+        if delta_curr < tol
             if !quiet
                 println("$solver converged after $iter iterations ")
             end
-            break
+            return c_new, deltas
         end
 
         copyto!(c_old, c_new)
+    end
+
+    if !quiet
+        println("$solver did not converge after $max_iters iterations")
     end
 
     return c_new, deltas
@@ -508,6 +518,113 @@ function c_next_SOR_sink!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{
 
     return c
 end
+
+
+"""
+    c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool})::Matrix{Float64}
+
+Compute the next iteration using SOR with red-black ordering and sink regions.
+
+# Arguments
+- `c::Matrix{Float64}`: Concentration field (modified in-place)
+- `omega::Float64`: Relaxation parameter
+- `sink_mask::Matrix{Bool}`: Boolean mask indicating sink regions (true = sink)
+
+# Returns
+- `Matrix{Float64}`: Reference to the updated concentration field
+
+# Notes
+Uses red-black Gauss-Seidel ordering to enable vectorization with `@turbo`. Updates are split into:
+- Red cells: where (i+j) is even
+- Black cells: where (i+j) is odd
+
+Cells marked as sinks have their concentration fixed at 0.0 after both passes complete.
+"""
+function c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool})::Matrix{Float64}
+    N = size(c, 1)
+    Fo = 0.25 * omega
+
+    do_sink = any(sink_mask)
+
+    # Red pass: update cells where for even rows
+    @inbounds for i in 2:2:N-1
+        @inbounds @turbo for j in 2:2:N-1  # Start at 2 step by 2
+            c[i, j] = Fo * (
+                c[i+1, j] +
+                c[i-1, j] +
+                c[i, j+1] +
+                c[i, j-1]
+            ) + (1 - omega) * c[i, j]
+        end
+    end
+    # Red pass: update cells where for uneven rows
+    @inbounds for i in 3:2:N-1
+        @inbounds @turbo for j in 3:2:N-1  # Start at 3 step by 2
+            c[i, j] = Fo * (
+                c[i+1, j] +
+                c[i-1, j] +
+                c[i, j+1] +
+                c[i, j-1]
+            ) + (1 - omega) * c[i, j]
+        end
+    end
+
+    # Black pass: update cells where (i+j) is odd
+    @inbounds for i in 2:N-1
+        @inbounds for j in (3-(i%2)):2:N-1  # Start at 2 or 3 based on i (opposite of red), step by 2
+            c[i, j] = Fo * (
+                c[i+1, j] +
+                c[i-1, j] +
+                c[i, j+1] +
+                c[i, j-1]
+            ) + (1 - omega) * c[i, j]
+        end
+    end
+
+    # Do boundary pass - Red cells
+    @inbounds @turbo for j in 2:2:N-1  # Even j values (since i=1 is odd)
+        c[1, j] = Fo * (
+            c[2, j] +
+            c[N, j] +
+            c[1, j+1] +
+            c[1, j-1]
+        ) + (1 - omega) * c[1, j]
+    end
+    @inbounds @turbo for j in 3:2:N-1  # Odd j values (since i=N parity depends on N)
+        c[N, j] = Fo * (
+            c[1, j] +
+            c[N-1, j] +
+            c[N, j+1] +
+            c[N, j-1]
+        ) + (1 - omega) * c[N, j]
+    end
+
+    # Do boundary pass - Black cells
+    @inbounds @turbo for j in 3:2:N-1  # Odd j values
+        c[1, j] = Fo * (
+            c[2, j] +
+            c[N, j] +
+            c[1, j+1] +
+            c[1, j-1]
+        ) + (1 - omega) * c[1, j]
+    end
+    @inbounds @turbo for j in 2:2:N-1  # Even j values
+        c[N, j] = Fo * (
+            c[1, j] +
+            c[N-1, j] +
+            c[N, j+1] +
+            c[N, j-1]
+        ) + (1 - omega) * c[N, j]
+    end
+
+    # Apply sink mask after both passes
+    if do_sink
+        c[sink_mask] .= 0.0
+    end
+
+    return c
+end
+@deprecate c_next_SOR_sink!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool}) c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool})
 
 
 """
