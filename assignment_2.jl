@@ -58,7 +58,7 @@ function parse_commandline()::Dict{String,Any}
         action = :store_true
 
         "--gpu"
-        help = "use GPU for computation"
+        help = "use GPU for computation. WARNING: This feature currently only supports Metal.jl on macOS."
         action = :store_true
 
         "--nprocs"
