@@ -1,6 +1,7 @@
 module DistributedGIF
 
 using Distributed
+using Printf: @sprintf
 using ProgressMeter
 @everywhere using Plots
 @everywhere begin
@@ -56,14 +57,12 @@ Create an animated GIF from a vector of plots using distributed computing and FF
 - With `do_palette=true`, generates an optimized palette for better color reproduction
 - Uses videotoolbox hardware acceleration on macOS when available
 """
-function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifpath::String; fps::Int64=30, do_palette=false, width=600)
-    auto_mkpath(gifpath)  # Ensure output directory exists
+function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifpath::String; fps::Int64=30, do_palette=false, width::Int=0, use_ffmpeg::Bool=true, verbose::Int=1)
+    # Parse arguments
+    verbose_level = (verbose isa Int ? verbose : verbose ? 32 : 16) # "error"
+    width = width == 0 ? plots[1].attr[:size][1] : width  # Default to width of first plot if not specified
 
-    # Create a temporary directory to store frames
-    tmp_dirname = "tmp_gif" * string(rand(1:10000))  # Generate a unique temporary directory name
-    mkdir(tmp_dirname)
-    pad_length = length(string(length(plots)))  # Determine padding length based on number of frames
-
+    anim = Animation()
     n = length(plots)
     prog = Progress(n, 1, "Saving GIF frames...")
 
@@ -76,50 +75,68 @@ function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifpath::St
         end
     end
 
+    # Save frames in parallel using distributed workers
     @sync @distributed for i in 1:n
         p = plots[i]
-        savefig(p, "$(tmp_dirname)/frame_$(lpad(i, pad_length, '0')).png")
+        # savefig(p, "$(tmp_dirname)/frame_$(lpad(i, pad_length, '0')).png")
+        filename = @sprintf "%06d.png" i
+        png(p, joinpath(anim.dir, filename))
         put!(ch, 1)
     end
-
     wait(t)  # Ensure the progress bar task completes before proceeding
+    # Make sure to add frames in the correct order 
+    for i in 1:n
+        filename = @sprintf "%06d.png" i
+        push!(anim.frames, joinpath(anim.dir, filename))
+    end
 
     # Build full path pattern for ffmpeg
-    frame_pattern = joinpath(tmp_dirname, "frame_%0$(pad_length)d.png")
+    frame_pattern = joinpath(anim.dir, "%06d.png")
 
-    # Use FFMPEG to create GIF
-    if do_palette
-        palette_path = joinpath(tmp_dirname, "palette.png")
-        run(`$(FFMPEG.ffmpeg) -framerate $fps 
-            -i $frame_pattern
-            -vf "fps=$fps,scale=$width:-1:flags=lanczos,palettegen"
-            -y $palette_path`)
+    if use_ffmpeg
+        # Use FFMPEG to create GIF
+        if do_palette
+            # Generate palette for better quality
+            palette_path = joinpath(anim.dir, "palette.bmp")
+            run(`$(FFMPEG.ffmpeg) -framerate $fps 
+                -i $frame_pattern
+                -vf "fps=$fps,scale=$width:-1:flags=lanczos,palettegen"
+                -y $palette_path
+                -v $verbose_level
+                `)
 
 
-        run(`$(FFMPEG.ffmpeg) -framerate $fps 
-            -i $frame_pattern
-            -i $palette_path
-            -y $gifpath
-            -hwaccel videotoolbox
-            -vf "fps=$fps,scale=$width:-1:flags=fast_bilinear" 
-            -filter_complex "fps=$fps,scale=$width:-1:flags=lanczos[x];[x][1:v]paletteuse" 
-            -gifflags -transdiff
-            `)
+            run(`$(FFMPEG.ffmpeg) -framerate $fps 
+                -i $frame_pattern
+                -i $palette_path
+                -y $gifpath
+                -hwaccel videotoolbox
+                -vf "fps=$fps,scale=$width:-1:flags=fast_bilinear" 
+                -filter_complex "fps=$fps,scale=$width:-1:flags=lanczos[x];[x][1:v]paletteuse" 
+                -gifflags -transdiff
+                -v $verbose_level
+                `)
+        else
+            run(`$(FFMPEG.ffmpeg) 
+                -hwaccel videotoolbox          
+                -i $frame_pattern
+                -vf "fps=$fps,scale=$width:-1:flags=fast_bilinear" 
+                -gifflags -transdiff           
+                -y $gifpath
+                -v $verbose_level
+                `)
+        end
     else
-        run(`$(FFMPEG.ffmpeg) 
-            -hwaccel videotoolbox          
-            -i $frame_pattern
-            -vf "fps=$fps,scale=$width:-1:flags=fast_bilinear" 
-            -gifflags -transdiff           
-            -y $gifpath`)
+        # Use native gif-function
+        gif(anim, gifpath, fps=fps)
     end
 
     # Clean up temporary files
-    rm(tmp_dirname; recursive=true)
+    rm(anim.dir; recursive=true)
 
     # Detect if we are running in a Jupyter notebook and display the GIF
     if Base.invokelatest(isdefined, Main, :IJulia) && Main.IJulia.inited
-        display("image/png", read(gifpath))
+        return AnimatedGif(gifpath)
     else
         println("GIF created successfully: $gifpath")
     end
