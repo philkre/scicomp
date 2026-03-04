@@ -2,6 +2,15 @@ module DistributedUtil
 
 using Distributed: addprocs, nprocs
 
+function set_procs(n_procs_max::Int)
+    current_procs = nprocs()
+    if current_procs < n_procs_max
+        addprocs(n_procs_max - current_procs - 1)
+    else
+        @info "Already have $current_procs workers, which is >= requested $n_procs_max. No new workers added."
+    end
+end
+
 """
     maximize_workers(; quiet=false)
 
@@ -22,7 +31,7 @@ function maximize_workers(; quiet=false)
     if !quiet
         @info "Adding worker processes..."
     end
-    addprocs(Sys.CPU_THREADS - nprocs() - 1)
+    set_procs(Sys.CPU_THREADS)
     if !quiet
         @info "Number of workers: " * string(nprocs()) * "\nNumber of CPU threads: " * string(Sys.CPU_THREADS) * "\n"
     end
