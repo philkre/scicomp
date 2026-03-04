@@ -32,9 +32,11 @@ JuliaLocalPreferences.toml
 *.h5
 *.png
 *.mp4
+*.gif
 *.jld
 *.jld2
 
 # Local files 
 Scientific_Computing_Assignments.pdf
 tmp*/
+.CondaPkg/
