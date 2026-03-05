@@ -77,7 +77,19 @@ function main(; use_GPU::Bool=false, do_bench::Bool=false, do_gif::Bool=false, d
         run_bench(; N=N, L=L, omega=omega_sor, tol=tol, use_GPU=use_GPU, plot_output_dir=plot_output_dir)
     end
 
-    @time "Finished diffusion limited aggregation" run_diffusion_limited_aggregation(N, L, eta, tol, frames; i_max_conv=i_max, omega_sor=omega_sor, use_GPU=use_GPU, do_gif=do_gif, plot_output_dir=plot_output_dir)
+    @time "Finished diffusion limited aggregation" run_diffusion_limited_aggregation(
+        N,
+        L,
+        tol,
+        frames
+        ;
+        i_max_conv=i_max,
+        omega_sor=omega_sor,
+        eta=eta,
+        use_GPU=use_GPU,
+        do_gif=do_gif,
+        plot_output_dir=plot_output_dir
+    )
 
     # TODO: find optimal omega (?not possible due to different size of mask each frame)
     # TODO: experiment with eta
