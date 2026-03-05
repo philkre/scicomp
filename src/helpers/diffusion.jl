@@ -434,6 +434,89 @@ function solve_until_tol(solver::Function, c_initial::Union{Matrix{Float64},MtlA
 end
 
 
+function delta_metal!(diffs::MtlMatrix{Float32,Metal.PrivateStorage}, c_old::MtlMatrix{Float32,Metal.PrivateStorage}, c_new::MtlMatrix{Float32,Metal.PrivateStorage})
+    N = size(c_old, 1)
+
+    # 2D configuration
+    threads_per_group = (16, 16)  # 1024 threads total per group
+    groups = (cld(N, 16), cld(N - 2, 16))  # Cover all rows and N-2 columns
+    @metal threads = threads_per_group groups = groups max_abs_diff_kernel!(c_old, c_new, diffs)
+
+    return maximum(diffs)  # still syncs, but now we call it rarely
+end
+
+
+function max_abs_diff_kernel!(c_old::MtlDeviceMatrix{Float32,1}, c_new::MtlDeviceMatrix{Float32,1}, diffs::MtlDeviceMatrix{Float32,1})
+    (i, j) = thread_position_in_grid_2d()
+
+
+    diffs[i, j] = abs(c_new[i, j] - c_old[i, j])
+
+    return
+end
+
+
+function solve_until_tol_metal!(
+    solver!::Function,
+    c::MtlMatrix{Float32,Metal.PrivateStorage},
+    tol::Float64,
+    i_max::Int,
+    args_solver...
+    ;
+    quiet::Bool=false,
+    track_deltas::Bool=false,
+    check_every::Int=100,
+    c_old::MtlMatrix{Float32,Metal.PrivateStorage}=similar(c),
+    diffs::MtlMatrix{Float32,Metal.PrivateStorage}=similar(c),  # allocate once
+    kwargs_solver...)::Union{MtlMatrix{Float32,Metal.PrivateStorage},Tuple{MtlMatrix{Float32,Metal.PrivateStorage},Vector{Float32}}}
+    if track_deltas
+        deltas = Float32[]
+    end
+
+    for i in 1:i_max
+        # Only sync every `check_every` iterations to copy c to c_old and compute delta, otherwise let GPU run asynchronously
+        if i % check_every == 0
+            copyto!(c_old, c)
+        end
+
+        # Update
+        solver!(c, args_solver...; kwargs_solver...)
+
+        # Check convergence every `check_every` iterations
+        if i % check_every == 0
+            # Compute delta on GPU and only sync to CPU for the single scalar value, instead of syncing entire c matrix every iteration
+            delta = delta_metal!(diffs, c_old, c)
+            if track_deltas
+                push!(deltas, delta)
+            end
+
+            # Stopping condition
+            if delta < tol
+                if !quiet
+                    println("$solver! converged after $i iterations ")
+                end
+
+                if track_deltas
+                    return c, deltas
+                else
+                    return c
+                end
+            end
+        end
+    end
+
+    if !quiet
+        println("$solver! did not converge after $i_max iterations")
+    end
+
+    if track_deltas
+        return c, deltas
+    else
+        return c
+    end
+end
+
+
 """
     get_iteration_count_SOR(c_0::Matrix{Float64}, omega::Float64, tol::Float64; i_max=20000, check_interval::Int64=1)::Int64
 
@@ -492,7 +575,7 @@ function c_next_SOR_sink!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{
 
     do_sink = any(sink_mask)
 
-    # # Apply sink mask
+    # Apply sink mask
     if do_sink
         c[sink_mask] .= 0.0
     end
@@ -518,6 +601,8 @@ function c_next_SOR_sink!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{
 
     return c
 end
+
+
 
 
 """
@@ -625,6 +710,58 @@ function c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mas
     return c
 end
 @deprecate c_next_SOR_sink!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool}) c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool})
+
+
+function c_next_SOR_kernel!(c::MtlDeviceMatrix{Float32,1}, sink_mask::MtlDeviceMatrix{Bool,1}, Fo::Float32, omega::Float32, N::Int, color::Int32)
+    i = thread_position_in_grid_2d().x
+    j = thread_position_in_grid_2d().y + 1 # Shift j by 1 to account for skipping first and last column
+
+    # Red-black ordering: only update if (i+j) mod 2 matches color
+    if ((i + j) & 1) != color
+        return
+    end
+
+    # Check bound
+    if i > N || j >= N
+        return
+    end
+
+    # Check mask and exit early if this cell is a sink
+    if sink_mask[i, j]
+        c[i, j] = 0.0f0
+        return
+    end
+
+    i_right = (i == N) ? 1 : i + 1
+    i_left = (i == 1) ? N : i - 1
+
+    c[i, j] = Fo * (
+        c[i_right, j] +
+        c[i_left, j] +
+        c[i, j+1] +
+        c[i, j-1]
+    ) + (1 - omega) * c[i, j]
+    return
+end
+
+
+function c_next_SOR_sink_metal!(c::MtlMatrix{Float32}, omega::Float32, sink_mask::MtlMatrix{Bool})::MtlMatrix{Float32}
+    N = size(c, 1)
+    Fo = Float32(0.25) * omega
+
+    # 2D configuration
+    threads_per_group = (16, 16)  # 256 threads total per group
+    groups = (cld(N, 16), cld(N - 2, 16))  # Cover all rows and N-2 columns
+
+    # Red-black ordering for in-place SOR updates
+    # Red pass: update cells where (i+j) is even
+    @metal threads = threads_per_group groups = groups c_next_SOR_kernel!(c, sink_mask, Fo, omega, N, Int32(0))
+
+    # Black pass: update cells where (i+j) is odd (no sync - let GPU schedule)
+    @metal threads = threads_per_group groups = groups c_next_SOR_kernel!(c, sink_mask, Fo, omega, N, Int32(1))
+
+    return c
+end
 
 
 """
