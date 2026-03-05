@@ -11,5 +11,7 @@ include("plot_wave.jl")
 include("wave_equations.jl")
 include("DLA_core.jl")
 include("DLA_util.jl")
+include("gray_scott_core.jl")
+include("gray_scott_util.jl")
 
 end # module
