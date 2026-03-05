@@ -9,5 +9,7 @@ include("overlay_image.jl")
 include("savefig.jl")
 include("plot_wave.jl")
 include("wave_equations.jl")
+include("DLA_core.jl")
+include("DLA_util.jl")
 
 end # module
