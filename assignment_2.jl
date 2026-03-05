@@ -137,7 +137,7 @@ if ((abspath(PROGRAM_FILE) == @__FILE__) || !isempty(PROGRAM_FILE)) && !isintera
             @everywhere include("src/ass_2/assignment_2_2.jl")
             @everywhere using .Assignment_2_2: main as main_2_2
         end
-        @time "Assignment 2.2 completed" main_2_2(; do_bench=do_bench, do_gif=do_gif, do_cache=do_cache, plot_output_dir=plot_output_dir)
+        @time "Assignment 2.2 completed" main_2_2(; do_bench=do_bench, do_gif=do_gif, do_cache=do_cache, use_GPU=use_GPU, plot_output_dir=plot_output_dir)
     end
 
     # Assignment 2.3

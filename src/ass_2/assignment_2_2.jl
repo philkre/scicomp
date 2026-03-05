@@ -7,6 +7,7 @@ include("../helpers/__init__.jl")
 using .Helpers.DLACore: choose_candidate_monte_carlo
 using .Helpers.DLAUtil: run_diffusion_limited_aggregation
 
+
 DEFAULT_PLOT_OUTPUT_DIR = "plots/ass_2"
 
 
@@ -37,7 +38,6 @@ function main(; use_GPU::Bool=false, do_bench::Bool=false, do_gif::Bool=false, d
         do_gif=do_gif,
         plot_output_dir=plot_output_dir
     )
-
 
     return
 end
