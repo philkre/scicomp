@@ -1,9 +1,9 @@
 module Diffusion
 
 using Distributed
-@everywhere using LoopVectorization
-using SpecialFunctions
-using Metal
+@everywhere using LoopVectorization: @turbo
+using SpecialFunctions: erfc
+using Metal: MtlMatrix, MtlDeviceMatrix, @metal, PrivateStorage, thread_position_in_grid_2d
 using CUDA
 
 
@@ -348,7 +348,43 @@ function c_anal(x::Float64, t::Float64, D::Float64; i_max::Int=100)::Float64
     end
 end
 
+"""
+    analytical_sol(t::Float64, D::Float64, L::Float64, N::Int64)
+
+Lambda function to compute the analytical solution for the diffusion equation over a discrete grid.
+
+# Arguments
+- `t::Float64`: Time
+- `D::Float64`: Diffusion coefficient
+- `L::Float64`: Domain length
+- `N::Int64`: Number of grid points
+
+# Returns
+- `Vector{Float64}`: Analytical concentration values at grid points
+"""
 analytical_sol = (t::Float64, D::Float64, L::Float64, N::Int64) -> [c_anal(x, t, D) for x in LinRange(0, L, N)]
+
+
+"""
+    c_anal_2d(N::Int)::Matrix{Float64}
+
+Generate the analytical steady-state solution for 2D diffusion with linear gradient in y-direction.
+
+# Arguments
+- `N::Int`: Grid size (N×N)
+
+# Returns
+- `Matrix{Float64}`: Concentration field with linear gradient from 0 at y=0 to 1 at y=1
+
+# Notes
+This represents the steady-state solution where c(y=0)=0 and c(y=1)=1 with periodic boundaries in x.
+"""
+function c_anal_2d(N::Int)::Matrix{Float64}
+    c_0 = zeros(N, N)
+    c_y = range(0, stop=1, length=N)
+    c_0 .= c_y'  # Broadcast row vector to all rows
+    return c_0
+end
 
 
 """
@@ -363,25 +399,25 @@ Compute the maximum absolute difference between two concentration fields.
 # Returns
 - `Float64`: Maximum absolute difference (L∞ norm)
 """
-function delta(c_old::Union{Matrix{Float64},MtlArray{Float32,2}}, c_new::Union{Matrix{Float64},MtlArray{Float32,2}})
+function delta(c_old::Matrix{Float64}, c_new::Matrix{Float64})
     return maximum(abs.(c_new .- c_old))
 end
 
 
 """
-    stopping_condition(c_old::Union{Matrix{Float64},MtlArray{Float32,2}}, c_new::Union{Matrix{Float64},MtlArray{Float32,2}}, tol::Float64)
+    stopping_condition(c_old::Matrix{Float64}, c_new::Matrix{Float64}, tol::Float64)
 
 Check if the iterative solver has converged within tolerance.
 
 # Arguments
-- `c_old::Union{Matrix{Float64},MtlArray{Float32,2}}`: Previous concentration field
-- `c_new::Union{Matrix{Float64},MtlArray{Float32,2}}`: New concentration field
+- `c_old::Matrix{Float64}`: Previous concentration field
+- `c_new::Matrix{Float64}`: New concentration field
 - `tol::Float64`: Convergence tolerance
 
 # Returns
 - `Bool`: True if converged (maximum difference < tolerance)
 """
-function stopping_condition(c_old::Union{Matrix{Float64},MtlArray{Float32,2}}, c_new::Union{Matrix{Float64},MtlArray{Float32,2}}, tol::Float64)
+function stopping_condition(c_old::Matrix{Float64}, c_new::Matrix{Float64}, tol::Float64)::Bool
     return delta(c_old, c_new) < tol
 end
 
@@ -400,9 +436,9 @@ Solve the diffusion equation iteratively until convergence or maximum iterations
 - `quiet::Bool`: If true, suppress convergence messages (default: false)
 
 # Returns
-- `Tuple{Union{Matrix{Float64},MtlArray{Float32,2}}, Vector{Float64}}`: Final concentration field and convergence history
+- `Tuple{Matrix{Float64}, Vector{Float64}}`: Final concentration field and convergence history
 """
-function solve_until_tol(solver::Function, c_initial::Union{Matrix{Float64},MtlArray{Float32,2}}, tol::Float64, max_iters::Int, args_solver...; quiet::Bool=false, track_deltas::Bool=true, kwargs_solver...)::Union{Tuple{Union{Matrix{Float64},MtlArray{Float32,2}},Vector{Float64}},Union{Matrix{Float64},MtlArray{Float32,2}}}
+function solve_until_tol(solver::Function, c_initial::Matrix{Float64}, tol::Float64, max_iters::Int, args_solver...; quiet::Bool=false, track_deltas::Bool=true, kwargs_solver...)::Union{Tuple{Matrix{Float64},Vector{Float64}},Matrix{Float64}}
     c_old = copy(c_initial)
     c_new = copy(c_initial)
 
@@ -444,7 +480,23 @@ function solve_until_tol(solver::Function, c_initial::Union{Matrix{Float64},MtlA
 end
 
 
-function delta_metal!(diffs::MtlMatrix{Float32,Metal.PrivateStorage}, c_old::MtlMatrix{Float32,Metal.PrivateStorage}, c_new::MtlMatrix{Float32,Metal.PrivateStorage})
+"""
+    delta_metal!(diffs::MtlMatrix{Float32,PrivateStorage}, c_old::MtlMatrix{Float32,PrivateStorage}, c_new::MtlMatrix{Float32,PrivateStorage})
+
+Compute the maximum absolute difference between two Metal GPU arrays.
+
+# Arguments
+- `diffs::MtlMatrix{Float32,PrivateStorage}`: Preallocated array to store element-wise differences
+- `c_old::MtlMatrix{Float32,PrivateStorage}`: Previous concentration field
+- `c_new::MtlMatrix{Float32,PrivateStorage}`: New concentration field
+
+# Returns
+- `Float32`: Maximum absolute difference (L∞ norm)
+
+# Notes
+Computes differences on GPU and only syncs the maximum scalar value to CPU for efficiency.
+"""
+function delta_metal!(diffs::MtlMatrix{Float32,PrivateStorage}, c_old::MtlMatrix{Float32,PrivateStorage}, c_new::MtlMatrix{Float32,PrivateStorage})
     N = size(c_old, 1)
 
     # 2D configuration
@@ -456,6 +508,20 @@ function delta_metal!(diffs::MtlMatrix{Float32,Metal.PrivateStorage}, c_old::Mtl
 end
 
 
+"""
+    abs_diff_kernel_metal!(N::Int, c_old::MtlDeviceMatrix{Float32,1}, c_new::MtlDeviceMatrix{Float32,1}, diffs::MtlDeviceMatrix{Float32,1})
+
+Metal GPU kernel to compute element-wise absolute differences between concentration fields.
+
+# Arguments
+- `N::Int`: Grid size
+- `c_old::MtlDeviceMatrix{Float32,1}`: Previous concentration field on device
+- `c_new::MtlDeviceMatrix{Float32,1}`: New concentration field on device
+- `diffs::MtlDeviceMatrix{Float32,1}`: Output array for differences on device
+
+# Notes
+Skips boundary cells (first and last row) since they have fixed boundary conditions.
+"""
 function abs_diff_kernel_metal!(N::Int, c_old::MtlDeviceMatrix{Float32,1}, c_new::MtlDeviceMatrix{Float32,1}, diffs::MtlDeviceMatrix{Float32,1})
     (i, j) = thread_position_in_grid_2d()
 
@@ -469,9 +535,33 @@ function abs_diff_kernel_metal!(N::Int, c_old::MtlDeviceMatrix{Float32,1}, c_new
 end
 
 
+"""
+    solve_until_tol_metal!(solver!::Function, c::MtlMatrix{Float32,PrivateStorage}, tol::Float64, i_max::Int, args_solver...; quiet::Bool=false, track_deltas::Bool=false, check_every::Int=100, c_old::MtlMatrix{Float32,PrivateStorage}=similar(c), diffs::MtlMatrix{Float32,PrivateStorage}=similar(c), kwargs_solver...)
+
+Solve iteratively on Metal GPU until convergence or maximum iterations.
+
+# Arguments
+- `solver!::Function`: Metal solver function to use
+- `c::MtlMatrix{Float32,PrivateStorage}`: Initial concentration field (modified in-place)
+- `tol::Float64`: Convergence tolerance
+- `i_max::Int`: Maximum number of iterations
+- `args_solver...`: Additional arguments to pass to the solver
+- `quiet::Bool`: If true, suppress convergence messages (default: false)
+- `track_deltas::Bool`: If true, track convergence history (default: false)
+- `check_every::Int`: Check convergence every N iterations (default: 100)
+- `c_old::MtlMatrix{Float32,PrivateStorage}`: Preallocated array for old values
+- `diffs::MtlMatrix{Float32,PrivateStorage}`: Preallocated array for differences
+- `kwargs_solver...`: Additional keyword arguments for the solver
+
+# Returns
+- `MtlMatrix{Float32,PrivateStorage}` or `Tuple{MtlMatrix{Float32,PrivateStorage}, Vector{Float32}}`: Final concentration field and optionally convergence history
+
+# Notes
+Checks convergence periodically to minimize GPU-CPU synchronization overhead.
+"""
 function solve_until_tol_metal!(
     solver!::Function,
-    c::MtlMatrix{Float32,Metal.PrivateStorage},
+    c::MtlMatrix{Float32,PrivateStorage},
     tol::Float64,
     i_max::Int,
     args_solver...
@@ -479,9 +569,9 @@ function solve_until_tol_metal!(
     quiet::Bool=false,
     track_deltas::Bool=false,
     check_every::Int=100,
-    c_old::MtlMatrix{Float32,Metal.PrivateStorage}=similar(c),
-    diffs::MtlMatrix{Float32,Metal.PrivateStorage}=similar(c),  # allocate once
-    kwargs_solver...)::Union{MtlMatrix{Float32,Metal.PrivateStorage},Tuple{MtlMatrix{Float32,Metal.PrivateStorage},Vector{Float32}}}
+    c_old::MtlMatrix{Float32,PrivateStorage}=similar(c),
+    diffs::MtlMatrix{Float32,PrivateStorage}=similar(c),  # allocate once
+    kwargs_solver...)::Union{MtlMatrix{Float32,PrivateStorage},Tuple{MtlMatrix{Float32,PrivateStorage},Vector{Float32}}}
     if track_deltas
         deltas = Float32[]
     end
@@ -876,6 +966,24 @@ end
 @deprecate c_next_SOR_sink!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool}) c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool})
 
 
+"""
+    c_next_SOR_kernel_metal!(c::MtlDeviceMatrix{Float32,1}, sink_mask::MtlDeviceMatrix{Bool,1}, Fo::Float32, omega::Float32, N::Int, color::Int32)
+
+Metal GPU kernel for SOR iteration with red-black ordering and sink regions.
+
+# Arguments
+- `c::MtlDeviceMatrix{Float32,1}`: Concentration field on device
+- `sink_mask::MtlDeviceMatrix{Bool,1}`: Boolean mask indicating sink regions on device
+- `Fo::Float32`: Fourier number factor (0.25 * omega)
+- `omega::Float32`: Relaxation parameter
+- `N::Int`: Grid size
+- `color::Int32`: Red-black ordering flag (0 for red cells where i+j is even, 1 for black cells where i+j is odd)
+
+# Notes
+- Uses red-black ordering to avoid race conditions in parallel updates
+- Cells marked as sinks have their concentration fixed at 0.0
+- Periodic boundary conditions in x-direction
+"""
 function c_next_SOR_kernel_metal!(c::MtlDeviceMatrix{Float32,1}, sink_mask::MtlDeviceMatrix{Bool,1}, Fo::Float32, omega::Float32, N::Int, color::Int32)
     i = thread_position_in_grid_2d().x
     j = thread_position_in_grid_2d().y + 1 # Shift j by 1 to account for skipping first and last column
@@ -909,6 +1017,25 @@ function c_next_SOR_kernel_metal!(c::MtlDeviceMatrix{Float32,1}, sink_mask::MtlD
 end
 
 
+"""
+    c_next_SOR_sink_metal!(c::MtlMatrix{Float32}, omega::Float32, sink_mask::MtlMatrix{Bool})::MtlMatrix{Float32}
+
+Compute the next iteration using SOR on Metal GPU with sink regions.
+
+# Arguments
+- `c::MtlMatrix{Float32}`: Concentration field (modified in-place)
+- `omega::Float32`: Relaxation parameter
+- `sink_mask::MtlMatrix{Bool}`: Boolean mask indicating sink regions (true = sink)
+
+# Returns
+- `MtlMatrix{Float32}`: Reference to the updated concentration field
+
+# Notes
+- Uses red-black Gauss-Seidel ordering for in-place updates on GPU
+- Two kernel launches: one for red cells (i+j even), one for black cells (i+j odd)
+- Cells marked as sinks have their concentration fixed at 0.0
+- Periodic boundary conditions in x-direction
+"""
 function c_next_SOR_sink_metal!(c::MtlMatrix{Float32}, omega::Float32, sink_mask::MtlMatrix{Bool})::MtlMatrix{Float32}
     N = size(c, 1)
     Fo = Float32(0.25) * omega
