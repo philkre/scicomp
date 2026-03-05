@@ -17,11 +17,7 @@ using .Helpers.DLAUtil: run_diffusion_limited_aggregation
 # Plotting
 using .Helpers.SaveFig: savefig_auto_folder
 using .Helpers: get_heatmap_kwargs
-using .Helpers.DistributedGIF: gif_slow, distributed_gif
 
-
-FloatMatrix = Union{Matrix{Float64},Matrix{Float32}}
-DEFAULT_PLOT_OUTPUT_DIR = "plots/ass_2"
 
 DEFAULT_PLOT_OUTPUT_DIR = "plots/ass_2"
 
