@@ -806,25 +806,8 @@ function c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mas
             c[1, j-1]
         ) + (1 - omega) * c[1, j]
     end
-    @inbounds @turbo for j in 3:2:N-1  # Odd j values (since i=N parity depends on N)
-        c[N, j] = Fo * (
-            c[1, j] +
-            c[N-1, j] +
-            c[N, j+1] +
-            c[N, j-1]
-        ) + (1 - omega) * c[N, j]
-    end
-
     # Do boundary pass - Black cells
-    @inbounds @turbo for j in 3:2:N-1  # Odd j values
-        c[1, j] = Fo * (
-            c[2, j] +
-            c[N, j] +
-            c[1, j+1] +
-            c[1, j-1]
-        ) + (1 - omega) * c[1, j]
-    end
-    @inbounds @turbo for j in 2:2:N-1  # Even j values
+    @inbounds @turbo for j in 3:2:N-1  # Odd j values (since i=N parity depends on N)
         c[N, j] = Fo * (
             c[1, j] +
             c[N-1, j] +
