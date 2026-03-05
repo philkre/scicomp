@@ -106,15 +106,17 @@ function run_diffusion_limited_aggregation(
     end
 
     # Save final state plot
-    @time "Saved final state" begin
-        p = plot_DLA_frame(cpu_c, cpu_sink; title="Final Frame", heatmap_kwargs...)
-        savefig_auto_folder(p, joinpath(plot_output_dir, "diffusion_limited_aggregation_end_N=$N.png"))
-    end
+    filename_final_state = joinpath(plot_output_dir, "diffusion_limited_aggregation_end_N=$(N)_$(candidate_picker).png")
+    p_final = plot_DLA_frame(cpu_c, cpu_sink; title="Final Frame", heatmap_kwargs...)
+    savefig_auto_folder(p_final, filename_final_state)
+    @info "Saved final state to $filename_final_state"
+
 
     # Save gif of the process
     if do_gif
-        @time "Finished gif generation" begin
-            distributed_gif(plots, joinpath(plot_output_dir, "diffusion_limited_aggregation_N=$N.gif"); fps=60, do_palette=true, width=900, hwaccel="videotoolbox")
+        filename_gif = joinpath(plot_output_dir, "diffusion_limited_aggregation_N=$(N)_$(candidate_picker).gif")
+        @time "Saved gif to $filename_gif" begin
+            distributed_gif(plots, filename_gif; fps=60, do_palette=true, width=900)
         end
     end
 
