@@ -442,15 +442,18 @@ function delta_metal!(diffs::MtlMatrix{Float32,Metal.PrivateStorage}, c_old::Mtl
     # 2D configuration
     threads_per_group = (16, 16)  # 1024 threads total per group
     groups = (cld(N, 16), cld(N - 2, 16))  # Cover all rows and N-2 columns
-    @metal threads = threads_per_group groups = groups abs_diff_kernel_metal!(c_old, c_new, diffs)
+    @metal threads = threads_per_group groups = groups abs_diff_kernel_metal!(N, c_old, c_new, diffs)
 
     return maximum(diffs)  # still syncs, but now we call it rarely
 end
 
 
-function abs_diff_kernel_metal!(c_old::MtlDeviceMatrix{Float32,1}, c_new::MtlDeviceMatrix{Float32,1}, diffs::MtlDeviceMatrix{Float32,1})
+function abs_diff_kernel_metal!(N::Int, c_old::MtlDeviceMatrix{Float32,1}, c_new::MtlDeviceMatrix{Float32,1}, diffs::MtlDeviceMatrix{Float32,1})
     (i, j) = thread_position_in_grid_2d()
 
+    if i > N || j > N - 2 || i == 1 || i == N
+        return
+    end
 
     diffs[i, j] = abs(c_new[i, j] - c_old[i, j])
 
@@ -620,7 +623,7 @@ function delta_cuda!(diffs::CuArray{Float32,2}, c_old::CuArray{Float32,2}, c_new
     # 2D configuration
     threads_per_block = (16, 16)  # 256 threads total per block
     blocks = (cld(N, 16), cld(N - 2, 16))  # Cover all rows and N-2 columns
-    @cuda threads = threads_per_block blocks = blocks abs_diff_kernel_cuda!(c_old, c_new, diffs)
+    @cuda threads = threads_per_block blocks = blocks abs_diff_kernel_cuda!(N, c_old, c_new, diffs)
 
     return maximum(diffs)  # still syncs, but now we call it rarely
 end
@@ -636,9 +639,13 @@ CUDA kernel to compute element-wise absolute differences.
 - `c_new::CuDeviceArray{Float32,2}`: New concentration field
 - `diffs::CuDeviceArray{Float32,2}`: Output array for differences
 """
-function abs_diff_kernel_cuda!(c_old::CuDeviceArray{Float32,2}, c_new::CuDeviceArray{Float32,2}, diffs::CuDeviceArray{Float32,2})
+function abs_diff_kernel_cuda!(N::Int, c_old::CuDeviceArray{Float32,2}, c_new::CuDeviceArray{Float32,2}, diffs::CuDeviceArray{Float32,2})
     i = threadIdx().x + (blockIdx().x - 1) * blockDim().x
     j = threadIdx().y + (blockIdx().y - 1) * blockDim().y
+
+    if i > N || j > N - 2 || i == 1 || i == N
+        return
+    end
 
     if i <= size(c_old, 1) && j <= size(c_old, 2)
         diffs[i, j] = abs(c_new[i, j] - c_old[i, j])
@@ -758,13 +765,15 @@ Cells marked as sinks have their concentration fixed at 0.0 after both passes co
 """
 function c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool})::Matrix{Float64}
     N = size(c, 1)
+    if isodd(N)
+        @warn "Current implementation of c_next_SOR_sink_red_black! assumes an even grid size for proper red-black ordering. Results may be incorrect for odd N."
+    end
     Fo = 0.25 * omega
 
-    do_sink = any(sink_mask)
-
-    # Red pass: update cells where for even rows
+    # Red pass: i+j = even 
+    # Red pass: update cells for even rows, even columns (even + even = even)
     @inbounds for i in 2:2:N-1
-        @inbounds @turbo for j in 2:2:N-1  # Start at 2 step by 2
+        @inbounds @turbo for j in 2:2:N-1
             c[i, j] = Fo * (
                 c[i+1, j] +
                 c[i-1, j] +
@@ -773,9 +782,9 @@ function c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mas
             ) + (1 - omega) * c[i, j]
         end
     end
-    # Red pass: update cells where for uneven rows
+    # Red pass: update cells for uneven rows, uneven columns (odd + odd = even)
     @inbounds for i in 3:2:N-1
-        @inbounds @turbo for j in 3:2:N-1  # Start at 3 step by 2
+        @inbounds @turbo for j in 3:2:N-1
             c[i, j] = Fo * (
                 c[i+1, j] +
                 c[i-1, j] +
@@ -784,10 +793,31 @@ function c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mas
             ) + (1 - omega) * c[i, j]
         end
     end
+    # Do boundary pass - Red cells (i+j = even) on the boundaries
+    @inbounds @turbo for j in 3:2:N-1
+        # Left boundary
+        c[1, j] = Fo * (
+            c[2, j] +
+            c[N, j] +
+            c[1, j+1] +
+            c[1, j-1]
+        ) + (1 - omega) * c[1, j]
 
-    # Black pass: update cells where (i+j) is odd
-    @inbounds for i in 2:N-1
-        @inbounds for j in (3-(i%2)):2:N-1  # Start at 2 or 3 based on i (opposite of red), step by 2
+    end
+    @inbounds @turbo for j in 2:2:N-1
+        # Right boundary
+        c[N, j] = Fo * (
+            c[1, j] +
+            c[N-1, j] +
+            c[N, j+1] +
+            c[N, j-1]
+        ) + (1 - omega) * c[N, j]
+    end
+
+    # Black pass: i+j = odd
+    # Black pass: update cells for even rows, uneven columns (even + odd = odd)
+    @inbounds for i in 2:2:N-1
+        @inbounds @turbo for j in 3:2:N-1
             c[i, j] = Fo * (
                 c[i+1, j] +
                 c[i-1, j] +
@@ -796,9 +826,20 @@ function c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mas
             ) + (1 - omega) * c[i, j]
         end
     end
-
-    # Do boundary pass - Red cells
-    @inbounds @turbo for j in 2:2:N-1  # Even j values (since i=1 is odd)
+    # Black pass: update cells for uneven rows, even columns (odd + even = odd)
+    @inbounds for i in 3:2:N-1
+        @inbounds @turbo for j in 2:2:N-1
+            c[i, j] = Fo * (
+                c[i+1, j] +
+                c[i-1, j] +
+                c[i, j+1] +
+                c[i, j-1]
+            ) + (1 - omega) * c[i, j]
+        end
+    end
+    # Do boundary pass - Black cells (i+j = odd) on the boundaries
+    @inbounds @turbo for j in 2:2:N-1
+        # Left boundary
         c[1, j] = Fo * (
             c[2, j] +
             c[N, j] +
@@ -806,8 +847,8 @@ function c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mas
             c[1, j-1]
         ) + (1 - omega) * c[1, j]
     end
-    # Do boundary pass - Black cells
-    @inbounds @turbo for j in 3:2:N-1  # Odd j values (since i=N parity depends on N)
+    @inbounds @turbo for j in 3:2:N-1
+        # Right boundary
         c[N, j] = Fo * (
             c[1, j] +
             c[N-1, j] +
@@ -817,9 +858,7 @@ function c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mas
     end
 
     # Apply sink mask after both passes
-    if do_sink
-        c[sink_mask] .= 0.0
-    end
+    c[sink_mask] .= 0.0
 
     return c
 end
