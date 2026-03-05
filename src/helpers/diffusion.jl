@@ -584,10 +584,6 @@ function solve_until_tol(solver::Function, c_initial::Matrix{Float64}, tol::Floa
         println("$solver did not converge after $max_iters iterations")
     end
 
-    if !quiet
-        println("$solver did not converge after $max_iters iterations")
-    end
-
     if track_deltas
         return c_new, deltas
     else
