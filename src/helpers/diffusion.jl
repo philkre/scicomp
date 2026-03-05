@@ -8,6 +8,118 @@ using CUDA
 
 
 """
+    laplacian_2d(c::Matrix{Float64}, dx::Float64; periodic_x::Bool=true, periodic_y::Bool=true)::Matrix{Float64}
+
+Compute the 2D Laplacian ∇²c using finite differences.
+
+# Arguments
+- `c::Matrix{Float64}`: Concentration field
+- `dx::Float64`: Grid spacing (assumed equal in x and y)
+- `periodic_x::Bool`: Use periodic boundary conditions in x-direction (default: true)
+- `periodic_y::Bool`: Use periodic boundary conditions in y-direction (default: true)
+
+# Returns
+- `Matrix{Float64}`: Laplacian of the concentration field
+
+# Notes
+Uses 5-point stencil: ∇²c ≈ (c[i+1,j] + c[i-1,j] + c[i,j+1] + c[i,j-1] - 4c[i,j]) / dx²
+"""
+function laplacian_2d(c::Matrix{Float64}, dx::Float64; periodic_x::Bool=true, periodic_y::Bool=true)::Matrix{Float64}
+    N, M = size(c)
+    laplacian = zeros(N, M)
+
+    Fo = 1.0 / dx^2
+
+    # Do everything except boundaries
+    @inbounds @turbo for i in 2:N-1, j in 2:M-1
+        # 5-point stencil for Laplacian
+        laplacian[i, j] = Fo * (
+            c[i+1, j] +
+            c[i-1, j] +
+            c[i, j+1] +
+            c[i, j-1]
+        ) - 4 * Fo * c[i, j]
+    end
+
+    # Handle x boundaries
+    if periodic_x
+        @inbounds @turbo for j in 2:M-1
+            # Left boundary
+            laplacian[1, j] = Fo * (
+                c[2, j] +
+                c[N, j] +
+                c[1, j+1] +
+                c[1, j-1]
+            ) - 4 * Fo * c[1, j]
+            # Right boundary
+            laplacian[N, j] = Fo * (
+                c[1, j] +
+                c[N-1, j] +
+                c[N, j+1] +
+                c[N, j-1]
+            ) - 4 * Fo * c[N, j]
+        end
+    else
+        @inbounds @turbo for j in 2:M-1
+            # Left boundary
+            laplacian[1, j] = Fo * (
+                c[2, j] +
+                c[1, j] +
+                c[1, j+1] +
+                c[1, j-1]
+            ) - 4 * Fo * c[1, j]
+            # Right boundary
+            laplacian[N, j] = Fo * (
+                c[N, j] +
+                c[N-1, j] +
+                c[N, j+1] +
+                c[N, j-1]
+            ) - 4 * Fo * c[N, j]
+        end
+    end
+
+    # Handle y boundaries
+    if periodic_y
+        @inbounds @turbo for i in 2:N-1
+            # Bottom boundary
+            laplacian[i, 1] = Fo * (
+                c[i+1, 1] +
+                c[i-1, 1] +
+                c[i, 2] +
+                c[i, M]
+            ) - 4 * Fo * c[i, 1]
+            # Top boundary
+            laplacian[i, M] = Fo * (
+                c[i+1, M] +
+                c[i-1, M] +
+                c[i, 1] +
+                c[i, M-1]
+            ) - 4 * Fo * c[i, M]
+        end
+    else
+        @inbounds @turbo for i in 2:N-1
+            # Bottom boundary
+            laplacian[i, 1] = Fo * (
+                c[i+1, 1] +
+                c[i-1, 1] +
+                c[i, 2] +
+                c[i, 1]
+            ) - 4 * Fo * c[i, 1]
+            # Top boundary
+            laplacian[i, M] = Fo * (
+                c[i+1, M] +
+                c[i-1, M] +
+                c[i, M] +
+                c[i, M-1]
+            ) - 4 * Fo * c[i, M]
+        end
+    end
+
+    return laplacian
+end
+
+
+"""
     c_next(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)::Matrix{Float64}
 
 Compute the next time step for the diffusion equation using explicit finite differences.

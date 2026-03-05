@@ -116,7 +116,7 @@ Create an animated GIF from a vector of plots using distributed computing and FF
 - Leverages FFMPEG for efficient GIF encoding with hardware acceleration
 - Automatically creates and cleans up temporary frame directory
 - With `do_palette=true`, generates an optimized palette for better color reproduction
-- Uses videotoolbox hardware acceleration on macOS when available
+- Uses OpenCL hardware acceleration on macOS when available
 """
 function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifpath::String; fps::Int64=30, do_palette=false, width::Int=nothing, use_ffmpeg::Bool=true, verbose::Bool=false, hwaccel::String="OpenCL")
     # Parse arguments
@@ -178,7 +178,7 @@ function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifpath::St
     # Detect if we are running in a Jupyter notebook and display the GIF
     if Base.invokelatest(isdefined, Main, :IJulia) && Main.IJulia.inited
         gif_data = read(gifpath)
-        return display("image/gif", gif_data)    
+        return display("image/gif", gif_data)
     else
         println("GIF created successfully: $gifpath")
     end
