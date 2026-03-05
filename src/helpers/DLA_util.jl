@@ -9,7 +9,7 @@ include("diffusion.jl")
 using .Diffusion: c_anal_2d
 
 include("DLA_core.jl")
-using .DLACore: FloatMatrix, diffusion_limited_aggregation_step!
+using .DLACore: FloatMatrix, diffusion_limited_aggregation_step!, choose_candidate
 
 include("savefig.jl")
 using .SaveFig: savefig_auto_folder
@@ -18,7 +18,6 @@ include("distributed_gif.jl")
 using .DistributedGIF: distributed_gif
 
 include("get_heatmap_kwargs.jl")
-
 
 
 function superimpose_c_sink(c::FloatMatrix, c_sink::Matrix{Bool})::FloatMatrix
@@ -34,8 +33,20 @@ function plot_DLA_frame(cpu_c::FloatMatrix, cpu_sink::Matrix{Bool}; heatmap_kwar
 end
 
 
-
-function run_diffusion_limited_aggregation(N::Int, L::Float64, eta::Float64, tol::Float64, frames::Int; i_max_conv::Int=10_000, omega_sor::Float64, use_GPU::Bool=false, do_gif::Bool=false, plot_output_dir::String="plots")
+function run_diffusion_limited_aggregation(
+    N::Int,
+    L::Float64,
+    tol::Float64,
+    frames::Int
+    ;
+    i_max_conv::Int=10_000,
+    omega_sor::Float64,
+    eta::Union{Float64,Nothing}=nothing,
+    p_s::Union{Float64,Nothing}=nothing,
+    candidate_picker::Function=choose_candidate,
+    use_GPU::Bool=false,
+    do_gif::Bool=false,
+    plot_output_dir::String="plots")
     # Instantiate starting conditions
 
     # Source
@@ -71,7 +82,23 @@ function run_diffusion_limited_aggregation(N::Int, L::Float64, eta::Float64, tol
     heatmap_kwargs = get_heatmap_kwargs(N, L)
 
     @showprogress "Solving frames" for i in 1:1:frames
-        diffusion_limited_aggregation_step!(c, c_sink, c_source, eta, cpu_c, cpu_sink; tol=tol, i_max_conv=i_max_conv, omega_sor=omega_sor, use_GPU=use_GPU, c_old=c_old, diffs=diffs)
+        diffusion_limited_aggregation_step!(
+            c,
+            c_sink,
+            c_source,
+            cpu_c,
+            cpu_sink
+            ;
+            tol=tol,
+            i_max_conv=i_max_conv,
+            omega_sor=omega_sor,
+            eta=eta,
+            p_s=p_s,
+            candidate_picker=candidate_picker,
+            use_GPU=use_GPU,
+            c_old=c_old,
+            diffs=diffs
+        )
 
         if do_gif
             plots[i] = plot_DLA_frame(cpu_c, cpu_sink; title=@sprintf("Iteration %03d", i), heatmap_kwargs...)
