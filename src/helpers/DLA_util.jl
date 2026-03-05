@@ -23,7 +23,7 @@ include("get_heatmap_kwargs.jl")
 function superimpose_c_sink(c::FloatMatrix, c_sink::Matrix{Bool})::FloatMatrix
     c_plot = copy(c)
     c_plot[c_sink] .= 1.0  # Cap concentration inside [0.0, 1.0] for better visualization
-    return max.(min.(c_plot, 1.0), 0.0)
+    return clamp!(c_plot, 0.0, 1.0)
 end
 
 
@@ -106,15 +106,17 @@ function run_diffusion_limited_aggregation(
     end
 
     # Save final state plot
-    @time "Saved final state" begin
+    filename_final_state = joinpath(plot_output_dir, "diffusion_limited_aggregation_end_N=$(N)_$(candidate_picker).png")
+    @time "Saved final state to $filename_final_state" begin
         p = plot_DLA_frame(cpu_c, cpu_sink; title="Final Frame", heatmap_kwargs...)
-        savefig_auto_folder(p, joinpath(plot_output_dir, "diffusion_limited_aggregation_end_N=$N.png"))
+        savefig_auto_folder(p, filename_final_state)
     end
 
     # Save gif of the process
     if do_gif
-        @time "Finished gif generation" begin
-            distributed_gif(plots, joinpath(plot_output_dir, "diffusion_limited_aggregation_N=$N.gif"); fps=60, do_palette=true, width=900, hwaccel="videotoolbox")
+        filename_gif = joinpath(plot_output_dir, "diffusion_limited_aggregation_N=$(N)_$(candidate_picker).gif")
+        @time "Saved gif to $filename_gif" begin
+            distributed_gif(plots, filename_gif; fps=60, do_palette=true, width=900, hwaccel="videotoolbox")
         end
     end
 
