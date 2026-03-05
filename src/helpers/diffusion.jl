@@ -865,7 +865,6 @@ function abs_diff_kernel_cuda!(N::Int, c_old::CuDeviceArray{Float32,2}, c_new::C
 end
 
 
-
 """
     get_iteration_count_SOR(c_0::Matrix{Float64}, omega::Float64, tol::Float64; i_max=20000, check_interval::Int64=1)::Int64
 
