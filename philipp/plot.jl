@@ -30,6 +30,37 @@ function _sink_mask(
 end
 
 """
+    _overlay_sink_fill!(p, x, y, sink_mask)
+
+Overlay a filled sink region on an existing plot.
+"""
+function _overlay_sink_fill!(
+    p,
+    x::AbstractVector{<:Real},
+    y::AbstractVector{<:Real},
+    sink_mask::Union{Nothing,BitMatrix},
+)
+    if isnothing(sink_mask) || !any(sink_mask)
+        return nothing
+    end
+
+    sink_fill = fill(NaN, size(sink_mask))
+    sink_fill[sink_mask] .= 1.0
+    heatmap!(
+        p,
+        x,
+        y,
+        sink_fill',
+        color=cgrad([:white, :white]),
+        clims=(0, 1),
+        colorbar=false,
+        alpha=1.0,
+        label=false,
+    )
+    return nothing
+end
+
+"""
     _overlay_sink_outline!(p, x, y, sink_mask)
 
 Overlay a contour outline for the sink region on an existing plot.
@@ -344,7 +375,7 @@ end
 """
     plot_steadystate(c, output="output/img/steadystate.png"; sink_indices=nothing, silly_image_path="input/sink.png", silly=false)
 
-Plot a steady-state concentration heatmap and optionally overlay sink outlines
+Plot a steady-state concentration heatmap and optionally overlay filled sink regions
 or an image on the sink region.
 """
 function plot_steadystate(
@@ -363,6 +394,8 @@ function plot_steadystate(
         c',
         xlabel="x",
         ylabel="y",
+        xlims=(x[1], x[end]),
+        ylims=(y[1], y[end]),
         title="Steady State Concentration Profile",
         aspect_ratio=1,
         color=:viridis,
@@ -370,6 +403,7 @@ function plot_steadystate(
     )
     sink_mask = _sink_mask(size(c), sink_indices)
     if sink_indices !== nothing
+        _overlay_sink_fill!(p, x, y, sink_mask)
         _overlay_sink_outline!(p, x, y, sink_mask)
 
         if silly

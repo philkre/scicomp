@@ -169,9 +169,10 @@ function laplace_sor!(
                 c[i, j+1] + c[i, j-1]
             )
             c[i, j] = (1 - omega) * c[i, j] + omega * c_new
-            _apply_sink!(c, sink_indices)
         end
     end
+
+    _apply_sink!(c, sink_indices)
 
     # Dirichlet in y
     c[:, 1] .= 0
@@ -179,6 +180,8 @@ function laplace_sor!(
 
     # Periodic in x
     c[1, :] .= c[end, :]
+
+    clamp!(c, 0.0, Inf) # ensure non-negativity without allocations
 
     return nothing
 end
