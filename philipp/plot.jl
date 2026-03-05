@@ -8,8 +8,9 @@ using LaTeXStrings
 
 import ..Model: analytical_profile_series
 import ..DataIO: load_output
+import ..Sim: run_steadystate
 
-export plot_animation, plot_profiles, plot_2d_concentration, plot_wave_final, animate_wave_all, plot_steadystate, plot_concentration_profiles_steady, plot_convergence_its, plot_omega_optimisation, plot_omega_sweep_panels
+export plot_animation, plot_profiles, plot_2d_concentration, plot_wave_final, animate_wave_all, animate_dla, plot_steadystate, plot_concentration_profiles_steady, plot_convergence_its, plot_omega_optimisation, plot_omega_sweep_panels, plot_multigrid_vs_sor_error, plot_multigrid_vs_sor_error_analytical
 
 """
     _sink_mask(dims, sink_indices)
@@ -373,6 +374,51 @@ function animate_wave_all(
 end
 
 """
+    animate_dla(results; filename="output/img/dla_animation.mp4", fps=30, max_frames=300)
+
+Create an MP4 animation from DLA snapshots in `results`.
+Renders concentration as heatmap and overlays the aggregate as a filled sink mask.
+"""
+function animate_dla(
+    results::Dict{String,<:Any};
+    filename::String="output/img/dla_animation.mp4",
+    fps::Int=30,
+    max_frames::Int=300,
+)
+    cs = results["cs"]
+    masks = results["masks"]
+    nt = length(cs)
+    stride = max(1, cld(nt, max_frames))
+
+    anim = @animate for i in 1:stride:nt
+        c = cs[i]
+        x = range(0, stop=1, length=size(c, 1))
+        y = range(0, stop=1, length=size(c, 2))
+        sink_mask = masks[i] .== 0.0
+
+        p = heatmap(
+            x,
+            y,
+            c',
+            xlabel="x",
+            ylabel="y",
+            title="DLA step $i",
+            aspect_ratio=1,
+            color=:viridis,
+            clims=(0, 1),
+            xlims=(x[1], x[end]),
+            ylims=(y[1], y[end]),
+        )
+        _overlay_sink_fill!(p, x, y, sink_mask)
+    end
+
+    outfile = abspath(filename)
+    mkpath(dirname(outfile))
+    mp4(anim, outfile, fps=fps)
+    return outfile
+end
+
+"""
     plot_steadystate(c, output="output/img/steadystate.png"; sink_indices=nothing, silly_image_path="input/sink.png", silly=false)
 
 Plot a steady-state concentration heatmap and optionally overlay filled sink regions
@@ -404,7 +450,6 @@ function plot_steadystate(
     sink_mask = _sink_mask(size(c), sink_indices)
     if sink_indices !== nothing
         _overlay_sink_fill!(p, x, y, sink_mask)
-        _overlay_sink_outline!(p, x, y, sink_mask)
 
         if silly
             _overlay_sink_silly!(p, x, y, sink_mask, silly, silly_image_path)
@@ -486,9 +531,59 @@ function plot_convergence_its(
     end
     xlabel!(p, "iteration")
     ylabel!(p, "\\delta")
+    mkpath(dirname(output))
     savefig(p, output)
 
 end
+
+"""
+    plot_multigrid_vs_sor_error(; N=100, omega_sor=1.8, omega_mg=1.6, epsilon=1e-8, sor_iters=1000, mg_cycles=100, sink_indices=nothing, output="output/img/mg_vs_sor_error.png")
+
+Compute SOR and multigrid convergence traces using `run_steadystate` and render
+them via `plot_convergence_its`.
+Returns the absolute output path.
+"""
+function plot_multigrid_vs_sor_error(;
+    N::Int=100,
+    omega_sor::Float64=1.8,
+    omega_mg::Float64=1.6,
+    epsilon::Float64=1e-8,
+    sor_iters::Int=1000,
+    mg_cycles::Int=100,
+    sink_indices=nothing,
+    output::String="philipp/output/img/mg_vs_sor_error.png",
+)
+    c0 = zeros(N, N)
+    c0[:, 1] .= 0.0
+    c0[:, end] .= 1.0
+
+    _, _, deltas_sor = run_steadystate(
+        copy(c0),
+        epsilon;
+        method="sor",
+        omega=omega_sor,
+        sink_indices=sink_indices,
+        max_iters=sor_iters,
+    )
+
+    _, _, deltas_mg = run_steadystate(
+        copy(c0),
+        epsilon;
+        method="multigrid",
+        omega=omega_mg,
+        sink_indices=sink_indices,
+        mg_cycles_per_iter=1,
+        max_iters=mg_cycles,
+    )
+
+    plot_convergence_its(
+        [deltas_sor, deltas_mg],
+        ["SOR (sweeps)", "Multigrid (V-cycles)"],
+        output,
+    )
+    return abspath(output)
+end
+
 
 """
     plot_omega_optimisation(omegas, iterations, output="output/img/optimise_omega.png", max_iters=nothing, converged=nothing, computed=nothing)

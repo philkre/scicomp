@@ -1,11 +1,12 @@
 module Sim
 
 using ProgressMeter
+using TimerOutputs
 
-import ..Model: diffusion2d!, euler_step!, leapfrog_step!, laplace_jacobi!, laplace_gauss_seidel!, laplace_sor!
+import ..Model: diffusion2d!, euler_step!, leapfrog_step!, laplace_jacobi!, laplace_gauss_seidel!, laplace_sor!, laplace_multigrid!, update_mask!
 import ..DataIO: write_out!
 
-export run_wave, run_wave_1b, run_diffusion, run_steadystate, optimise_omega, sink_builder
+export run_wave, run_wave_1b, run_diffusion, run_steadystate, run_dla, optimise_omega, sink_builder
 
 """
     sink_builder(N; fraction=0.2, shape=:square)
@@ -190,6 +191,67 @@ function run_diffusion(
 end
 
 """
+    run_dla(N, max_cycles, nu, omega; epsilon=1e-6, growth_steps=100, timed=false, solver=:rb_sor)
+
+Run the DLA-coupled Laplace simulation on an `N x N` grid.
+Each growth step solves concentration with multigrid and then performs one
+stochastic growth event via `update_mask!`. Returns snapshots of concentration
+and occupancy mask; optionally returns timing breakdown when `timed=true`.
+"""
+function run_dla(
+    N::Int,
+    max_cycles::Int,
+    nu::Float64,
+    omega::Float64;
+    epsilon::Float64=1e-6,
+    growth_steps::Int=100,
+    timed::Bool=false,
+    solver::Symbol=:rb_sor,
+)
+    c = zeros(N, N)
+    c[:, 1] .= 0.0
+    c[:, end] .= 1.0
+
+    m = ones(N, N)
+    init_pos = [floor(Int, N / 2), 1]
+    m[init_pos...] = 0.0
+
+    cs = Matrix{Float64}[]
+    masks = Matrix{Float64}[]
+    to = TimerOutput()
+
+    for growth_step in 1:growth_steps
+        if any(m[:, end] .== 0.0)
+            println("Sink reached top row at growth step $growth_step, stopping simulation.")
+            break
+        end
+
+        sink_indices = @timeit to "findall sink_indices" findall(m .== 0.0)
+
+        @timeit to "laplace_multigrid! cycles" begin
+            laplace_multigrid!(
+                c;
+                sink_indices=sink_indices,
+                omega=omega,
+                ncycles=max_cycles,
+                tol=epsilon,
+                smoother=solver,
+            )
+        end
+
+        @timeit to "store frames" begin
+            push!(cs, copy(c))
+            push!(masks, copy(m))
+        end
+
+        @timeit to "update_mask!" update_mask!(c, m, nu)
+    end
+
+    results = Dict("cs" => cs, "masks" => masks)
+    return timed ? (results, to) : results
+end
+
+"""
     run_steadystate(c, epsilon; method="jacobi", omega=nothing, sink_indices=nothing, max_iters=1_000_000)
 
 Iterate a 2D Laplace solver until `maximum(abs.(c - c_prev)) < epsilon` or
@@ -201,19 +263,19 @@ function run_steadystate(
     method::String="jacobi",
     omega::Union{Nothing,Float64}=nothing,
     sink_indices::Union{Nothing,AbstractVector{Int},AbstractVector{CartesianIndex{2}}}=nothing,
-    sink_indices::Union{Nothing,AbstractVector{Int},AbstractVector{CartesianIndex{2}}}=nothing,
+    mg_cycles_per_iter::Int=1,
+    mg_smoother::Symbol=:sor,
     max_iters::Int=1_000_000,
 )::Tuple{Matrix{Float64},Int64,Vector{Float64}}
-    if !(method in ("jacobi", "gauss-seidel", "sor"))
-        error("Unknown method '$method'. Use 'jacobi', 'gauss-seidel', or 'sor'.")
+    if !(method in ("jacobi", "gauss-seidel", "sor", "multigrid"))
+        error("Unknown method '$method'. Use 'jacobi', 'gauss-seidel', 'sor', or 'multigrid'.")
     end
 
-    omega_eff = method == "sor" ? (isnothing(omega) ? 1.8 : omega) : 1.0
-    if method == "sor"
+    omega_eff = (method == "sor" || method == "multigrid") ? (isnothing(omega) ? 1.8 : omega) : 1.0
+    if method == "sor" || method == "multigrid"
         @assert 0.0 < omega_eff < 2.0 "SOR requires 0 < omega < 2, got $omega_eff"
     end
 
-    # Convert sink indices once to linear Int indices for faster repeated writes.
     sink_linear::Union{Nothing,Vector{Int}} = if isnothing(sink_indices)
         nothing
     elseif sink_indices isa AbstractVector{Int}
@@ -223,26 +285,21 @@ function run_steadystate(
         [lin[idx] for idx in sink_indices]
     end
 
-    # Convert sink indices once to linear Int indices for faster repeated writes.
-    sink_linear::Union{Nothing,Vector{Int}} = if isnothing(sink_indices)
-        nothing
-    elseif sink_indices isa AbstractVector{Int}
-        collect(Int, sink_indices)
-    else
-        lin = LinearIndices(c)
-        [lin[idx] for idx in sink_indices]
-    end
-
-    # Resolve method-specific iteration once (outside convergence loop).
     iter_step! = if method == "jacobi"
-        c_local -> laplace_jacobi!(c_local; sink_indices=sink_linear)
         c_local -> laplace_jacobi!(c_local; sink_indices=sink_linear)
     elseif method == "gauss-seidel"
         c_local -> laplace_gauss_seidel!(c_local; sink_indices=sink_linear)
-        c_local -> laplace_gauss_seidel!(c_local; sink_indices=sink_linear)
+    elseif method == "sor"
+        c_local -> laplace_sor!(c_local, omega_eff; sink_indices=sink_linear)
     else
-        c_local -> laplace_sor!(c_local, omega_eff; sink_indices=sink_linear)
-        c_local -> laplace_sor!(c_local, omega_eff; sink_indices=sink_linear)
+        c_local -> laplace_multigrid!(
+            c_local;
+            sink_indices=sink_linear,
+            omega=omega_eff,
+            smoother=mg_smoother,
+            ncycles=mg_cycles_per_iter,
+            tol=0.0,
+        )
     end
 
     deltas = Float64[]
@@ -284,12 +341,6 @@ function optimise_omega(
         AbstractVector{CartesianIndex{2}},
         Function,
     }=nothing,
-    sink_indices::Union{
-        Nothing,
-        AbstractVector{Int},
-        AbstractVector{CartesianIndex{2}},
-        Function,
-    }=nothing,
 )::Tuple{Matrix{Int64},BitMatrix,BitMatrix}
     its_vec = Matrix{Int64}(undef, length(omegas), length(Ns))
     converged = falses(length(omegas), length(Ns))
@@ -305,23 +356,6 @@ function optimise_omega(
     end
 
     for (j, N) in enumerate(Ns)
-        sink_for_N = if isnothing(sink_indices)
-            nothing
-        elseif sink_indices isa Function
-            sink_gen = sink_indices(N)
-            if isnothing(sink_gen)
-                nothing
-            elseif sink_gen isa AbstractVector{Int}
-                sink_gen
-            else
-                collect(sink_gen)
-            end
-        elseif sink_indices isa AbstractVector{Int}
-            sink_indices
-        else
-            collect(sink_indices)
-        end
-
         sink_for_N = if isnothing(sink_indices)
             nothing
         elseif sink_indices isa Function
