@@ -65,13 +65,13 @@ end
 
 
 function main(; use_GPU::Bool=false, do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, plot_output_dir::String=DEFAULT_PLOT_OUTPUT_DIR)
-    N::Int = 100
-    L = 1.0
-    omega_sor = 1.91
-    tol = 10^(-3)
-    eta = 1.5
-    i_max = 10_000
-    frames = 1000
+    N::Int = 100        # Grid size
+    L = 1.0             # Physical size of the domain
+    omega_sor = 1.91    # Over-relaxation parameter for SOR
+    tol = 10^(-3)       # Convergence tolerance
+    eta = 1.5           # Some parameter (not specified)
+    i_max = 10_000      # Maximum number of iterations
+    frames = 1000       # Number of frames to save
 
     if do_bench
         run_bench(; N=N, L=L, omega=omega_sor, tol=tol, use_GPU=use_GPU, plot_output_dir=plot_output_dir)
