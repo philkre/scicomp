@@ -178,7 +178,7 @@ function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifpath::St
     # Detect if we are running in a Jupyter notebook and display the GIF
     if Base.invokelatest(isdefined, Main, :IJulia) && Main.IJulia.inited
         gif_data = read(gifpath)
-        return display("image/gif", gif_data)
+        return display("image/gif", gif_data)    
     else
         println("GIF created successfully: $gifpath")
     end
