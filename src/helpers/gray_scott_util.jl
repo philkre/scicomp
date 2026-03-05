@@ -58,5 +58,4 @@ function plot_gray_scott_state(
     )
 end
 
-
 end # module
