@@ -869,7 +869,7 @@ function abs_diff_kernel_cuda!(N::Int, c_old::CuDeviceArray{Float32,2}, c_new::C
 end
 
 
-function delta_metal!(diffs::MtlMatrix{Float32,Metal.PrivateStorage}, c_old::MtlMatrix{Float32,Metal.PrivateStorage}, c_new::MtlMatrix{Float32,Metal.PrivateStorage})
+function delta_metal!(diffs::MtlMatrix{Float32,PrivateStorage}, c_old::MtlMatrix{Float32,PrivateStorage}, c_new::MtlMatrix{Float32,PrivateStorage})
     N = size(c_old, 1)
 
     # 2D configuration
@@ -893,7 +893,7 @@ end
 
 function solve_until_tol_metal!(
     solver!::Function,
-    c::MtlMatrix{Float32,Metal.PrivateStorage},
+    c::MtlMatrix{Float32,PrivateStorage},
     tol::Float64,
     i_max::Int,
     args_solver...
@@ -901,9 +901,9 @@ function solve_until_tol_metal!(
     quiet::Bool=false,
     track_deltas::Bool=false,
     check_every::Int=100,
-    c_old::MtlMatrix{Float32,Metal.PrivateStorage}=similar(c),
-    diffs::MtlMatrix{Float32,Metal.PrivateStorage}=similar(c),  # allocate once
-    kwargs_solver...)::Union{MtlMatrix{Float32,Metal.PrivateStorage},Tuple{MtlMatrix{Float32,Metal.PrivateStorage},Vector{Float32}}}
+    c_old::MtlMatrix{Float32,PrivateStorage}=similar(c),
+    diffs::MtlMatrix{Float32,PrivateStorage}=similar(c),  # allocate once
+    kwargs_solver...)::Union{MtlMatrix{Float32,PrivateStorage},Tuple{MtlMatrix{Float32,PrivateStorage},Vector{Float32}}}
     if track_deltas
         deltas = Float32[]
     end
