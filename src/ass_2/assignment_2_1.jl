@@ -59,7 +59,7 @@ function diffusion_limited_aggregation_step!(
     if use_GPU
         copyto!(cpu_c, solve_until_tol_metal!(c_next_SOR_sink_metal!, c, tol, i_max_conv, Float32(omega_sor), c_sink; check_every=25, c_old=c_old, diffs=diffs, quiet=true))
     else
-        c = solve_until_tol(c_next_SOR_sink!, c, tol, i_max_conv, omega_sor, c_sink; quiet=true)[1]
+        c = solve_until_tol(c_next_SOR_sink_red_black!, c, tol, i_max_conv, omega_sor, c_sink; quiet=true)[1]
         copyto!(cpu_c, c)
     end
 
@@ -203,7 +203,7 @@ end
 function main(; use_GPU::Bool=false, do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, plot_output_dir::String=DEFAULT_PLOT_OUTPUT_DIR)
     N::Int = 100
     L = 1.0
-    omega_sor = 1.9
+    omega_sor = 1.91
     tol = 10^(-3)
     eta = 1.5
     i_max = 10_000
