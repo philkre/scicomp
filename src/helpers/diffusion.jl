@@ -1,9 +1,11 @@
 module Diffusion
 
 using Distributed
-@everywhere using LoopVectorization
-using SpecialFunctions
-using Metal
+@everywhere using LoopVectorization: @turbo
+using SpecialFunctions: erfc
+using Metal: MtlMatrix, MtlDeviceMatrix, @metal, PrivateStorage, thread_position_in_grid_2d
+using CUDA
+
 
 """
     c_next(c::Matrix{Float64}, D::Float64, dx::Float64, dt::Float64)::Matrix{Float64}
@@ -346,7 +348,43 @@ function c_anal(x::Float64, t::Float64, D::Float64; i_max::Int=100)::Float64
     end
 end
 
+"""
+    analytical_sol(t::Float64, D::Float64, L::Float64, N::Int64)
+
+Lambda function to compute the analytical solution for the diffusion equation over a discrete grid.
+
+# Arguments
+- `t::Float64`: Time
+- `D::Float64`: Diffusion coefficient
+- `L::Float64`: Domain length
+- `N::Int64`: Number of grid points
+
+# Returns
+- `Vector{Float64}`: Analytical concentration values at grid points
+"""
 analytical_sol = (t::Float64, D::Float64, L::Float64, N::Int64) -> [c_anal(x, t, D) for x in LinRange(0, L, N)]
+
+
+"""
+    c_anal_2d(N::Int)::Matrix{Float64}
+
+Generate the analytical steady-state solution for 2D diffusion with linear gradient in y-direction.
+
+# Arguments
+- `N::Int`: Grid size (N×N)
+
+# Returns
+- `Matrix{Float64}`: Concentration field with linear gradient from 0 at y=0 to 1 at y=1
+
+# Notes
+This represents the steady-state solution where c(y=0)=0 and c(y=1)=1 with periodic boundaries in x.
+"""
+function c_anal_2d(N::Int)::Matrix{Float64}
+    c_0 = zeros(N, N)
+    c_y = range(0, stop=1, length=N)
+    c_0 .= c_y'  # Broadcast row vector to all rows
+    return c_0
+end
 
 
 """
@@ -361,25 +399,25 @@ Compute the maximum absolute difference between two concentration fields.
 # Returns
 - `Float64`: Maximum absolute difference (L∞ norm)
 """
-function delta(c_old::Union{Matrix{Float64},MtlArray{Float32,2}}, c_new::Union{Matrix{Float64},MtlArray{Float32,2}})
+function delta(c_old::Matrix{Float64}, c_new::Matrix{Float64})
     return maximum(abs.(c_new .- c_old))
 end
 
 
 """
-    stopping_condition(c_old::Union{Matrix{Float64},MtlArray{Float32,2}}, c_new::Union{Matrix{Float64},MtlArray{Float32,2}}, tol::Float64)
+    stopping_condition(c_old::Matrix{Float64}, c_new::Matrix{Float64}, tol::Float64)
 
 Check if the iterative solver has converged within tolerance.
 
 # Arguments
-- `c_old::Union{Matrix{Float64},MtlArray{Float32,2}}`: Previous concentration field
-- `c_new::Union{Matrix{Float64},MtlArray{Float32,2}}`: New concentration field
+- `c_old::Matrix{Float64}`: Previous concentration field
+- `c_new::Matrix{Float64}`: New concentration field
 - `tol::Float64`: Convergence tolerance
 
 # Returns
 - `Bool`: True if converged (maximum difference < tolerance)
 """
-function stopping_condition(c_old::Union{Matrix{Float64},MtlArray{Float32,2}}, c_new::Union{Matrix{Float64},MtlArray{Float32,2}}, tol::Float64)
+function stopping_condition(c_old::Matrix{Float64}, c_new::Matrix{Float64}, tol::Float64)::Bool
     return delta(c_old, c_new) < tol
 end
 
@@ -398,9 +436,9 @@ Solve the diffusion equation iteratively until convergence or maximum iterations
 - `quiet::Bool`: If true, suppress convergence messages (default: false)
 
 # Returns
-- `Tuple{Union{Matrix{Float64},MtlArray{Float32,2}}, Vector{Float64}}`: Final concentration field and convergence history
+- `Tuple{Matrix{Float64}, Vector{Float64}}`: Final concentration field and convergence history
 """
-function solve_until_tol(solver::Function, c_initial::Union{Matrix{Float64},MtlArray{Float32,2}}, tol::Float64, max_iters::Int, args_solver...; quiet::Bool=false, track_deltas::Bool=true, kwargs_solver...)::Tuple{Union{Matrix{Float64},MtlArray{Float32,2}},Vector{Float64}}
+function solve_until_tol(solver::Function, c_initial::Matrix{Float64}, tol::Float64, max_iters::Int, args_solver...; quiet::Bool=false, track_deltas::Bool=true, kwargs_solver...)::Union{Tuple{Matrix{Float64},Vector{Float64}},Matrix{Float64}}
     c_old = copy(c_initial)
     c_new = copy(c_initial)
 
@@ -420,7 +458,11 @@ function solve_until_tol(solver::Function, c_initial::Union{Matrix{Float64},MtlA
             if !quiet
                 println("$solver converged after $iter iterations ")
             end
-            return c_new, deltas
+            if track_deltas
+                return c_new, deltas
+            else
+                return c_new
+            end
         end
 
         copyto!(c_old, c_new)
@@ -430,25 +472,62 @@ function solve_until_tol(solver::Function, c_initial::Union{Matrix{Float64},MtlA
         println("$solver did not converge after $max_iters iterations")
     end
 
-    return c_new, deltas
+    if track_deltas
+        return c_new, deltas
+    else
+        return c_new
+    end
 end
 
 
-function delta_metal!(diffs::MtlMatrix{Float32,Metal.PrivateStorage}, c_old::MtlMatrix{Float32,Metal.PrivateStorage}, c_new::MtlMatrix{Float32,Metal.PrivateStorage})
+"""
+    delta_metal!(diffs::MtlMatrix{Float32,PrivateStorage}, c_old::MtlMatrix{Float32,PrivateStorage}, c_new::MtlMatrix{Float32,PrivateStorage})
+
+Compute the maximum absolute difference between two Metal GPU arrays.
+
+# Arguments
+- `diffs::MtlMatrix{Float32,PrivateStorage}`: Preallocated array to store element-wise differences
+- `c_old::MtlMatrix{Float32,PrivateStorage}`: Previous concentration field
+- `c_new::MtlMatrix{Float32,PrivateStorage}`: New concentration field
+
+# Returns
+- `Float32`: Maximum absolute difference (L∞ norm)
+
+# Notes
+Computes differences on GPU and only syncs the maximum scalar value to CPU for efficiency.
+"""
+function delta_metal!(diffs::MtlMatrix{Float32,PrivateStorage}, c_old::MtlMatrix{Float32,PrivateStorage}, c_new::MtlMatrix{Float32,PrivateStorage})
     N = size(c_old, 1)
 
     # 2D configuration
     threads_per_group = (16, 16)  # 1024 threads total per group
     groups = (cld(N, 16), cld(N - 2, 16))  # Cover all rows and N-2 columns
-    @metal threads = threads_per_group groups = groups max_abs_diff_kernel!(c_old, c_new, diffs)
+    @metal threads = threads_per_group groups = groups abs_diff_kernel_metal!(N, c_old, c_new, diffs)
 
     return maximum(diffs)  # still syncs, but now we call it rarely
 end
 
 
-function max_abs_diff_kernel!(c_old::MtlDeviceMatrix{Float32,1}, c_new::MtlDeviceMatrix{Float32,1}, diffs::MtlDeviceMatrix{Float32,1})
+"""
+    abs_diff_kernel_metal!(N::Int, c_old::MtlDeviceMatrix{Float32,1}, c_new::MtlDeviceMatrix{Float32,1}, diffs::MtlDeviceMatrix{Float32,1})
+
+Metal GPU kernel to compute element-wise absolute differences between concentration fields.
+
+# Arguments
+- `N::Int`: Grid size
+- `c_old::MtlDeviceMatrix{Float32,1}`: Previous concentration field on device
+- `c_new::MtlDeviceMatrix{Float32,1}`: New concentration field on device
+- `diffs::MtlDeviceMatrix{Float32,1}`: Output array for differences on device
+
+# Notes
+Skips boundary cells (first and last row) since they have fixed boundary conditions.
+"""
+function abs_diff_kernel_metal!(N::Int, c_old::MtlDeviceMatrix{Float32,1}, c_new::MtlDeviceMatrix{Float32,1}, diffs::MtlDeviceMatrix{Float32,1})
     (i, j) = thread_position_in_grid_2d()
 
+    if i > N || j > N - 2 || i == 1 || i == N
+        return
+    end
 
     diffs[i, j] = abs(c_new[i, j] - c_old[i, j])
 
@@ -456,9 +535,33 @@ function max_abs_diff_kernel!(c_old::MtlDeviceMatrix{Float32,1}, c_new::MtlDevic
 end
 
 
+"""
+    solve_until_tol_metal!(solver!::Function, c::MtlMatrix{Float32,PrivateStorage}, tol::Float64, i_max::Int, args_solver...; quiet::Bool=false, track_deltas::Bool=false, check_every::Int=100, c_old::MtlMatrix{Float32,PrivateStorage}=similar(c), diffs::MtlMatrix{Float32,PrivateStorage}=similar(c), kwargs_solver...)
+
+Solve iteratively on Metal GPU until convergence or maximum iterations.
+
+# Arguments
+- `solver!::Function`: Metal solver function to use
+- `c::MtlMatrix{Float32,PrivateStorage}`: Initial concentration field (modified in-place)
+- `tol::Float64`: Convergence tolerance
+- `i_max::Int`: Maximum number of iterations
+- `args_solver...`: Additional arguments to pass to the solver
+- `quiet::Bool`: If true, suppress convergence messages (default: false)
+- `track_deltas::Bool`: If true, track convergence history (default: false)
+- `check_every::Int`: Check convergence every N iterations (default: 100)
+- `c_old::MtlMatrix{Float32,PrivateStorage}`: Preallocated array for old values
+- `diffs::MtlMatrix{Float32,PrivateStorage}`: Preallocated array for differences
+- `kwargs_solver...`: Additional keyword arguments for the solver
+
+# Returns
+- `MtlMatrix{Float32,PrivateStorage}` or `Tuple{MtlMatrix{Float32,PrivateStorage}, Vector{Float32}}`: Final concentration field and optionally convergence history
+
+# Notes
+Checks convergence periodically to minimize GPU-CPU synchronization overhead.
+"""
 function solve_until_tol_metal!(
     solver!::Function,
-    c::MtlMatrix{Float32,Metal.PrivateStorage},
+    c::MtlMatrix{Float32,PrivateStorage},
     tol::Float64,
     i_max::Int,
     args_solver...
@@ -466,9 +569,9 @@ function solve_until_tol_metal!(
     quiet::Bool=false,
     track_deltas::Bool=false,
     check_every::Int=100,
-    c_old::MtlMatrix{Float32,Metal.PrivateStorage}=similar(c),
-    diffs::MtlMatrix{Float32,Metal.PrivateStorage}=similar(c),  # allocate once
-    kwargs_solver...)::Union{MtlMatrix{Float32,Metal.PrivateStorage},Tuple{MtlMatrix{Float32,Metal.PrivateStorage},Vector{Float32}}}
+    c_old::MtlMatrix{Float32,PrivateStorage}=similar(c),
+    diffs::MtlMatrix{Float32,PrivateStorage}=similar(c),  # allocate once
+    kwargs_solver...)::Union{MtlMatrix{Float32,PrivateStorage},Tuple{MtlMatrix{Float32,PrivateStorage},Vector{Float32}}}
     if track_deltas
         deltas = Float32[]
     end
@@ -514,6 +617,139 @@ function solve_until_tol_metal!(
     else
         return c
     end
+end
+
+
+"""
+    solve_until_tol_cuda!(solver!::Function, c::CuArray{Float32,2}, tol::Float64, i_max::Int, args_solver...; quiet::Bool=false, track_deltas::Bool=false, check_every::Int=100, c_old::CuArray{Float32,2}=similar(c), diffs::CuArray{Float32,2}=similar(c), kwargs_solver...)
+
+Solve iteratively on CUDA GPU until convergence or maximum iterations.
+
+# Arguments
+- `solver!::Function`: CUDA solver function to use
+- `c::CuArray{Float32,2}`: Initial concentration field (modified in-place)
+- `tol::Float64`: Convergence tolerance
+- `i_max::Int`: Maximum number of iterations
+- `args_solver...`: Additional arguments to pass to the solver
+- `quiet::Bool`: If true, suppress convergence messages (default: false)
+- `track_deltas::Bool`: If true, track convergence history (default: false)
+- `check_every::Int`: Check convergence every N iterations (default: 100)
+- `c_old::CuArray{Float32,2}`: Preallocated array for old values
+- `diffs::CuArray{Float32,2}`: Preallocated array for differences
+- `kwargs_solver...`: Additional keyword arguments for the solver
+
+# Returns
+- `CuArray{Float32,2}` or `Tuple{CuArray{Float32,2}, Vector{Float32}}`: Final concentration field and optionally convergence history
+"""
+function solve_until_tol_cuda!(
+    solver!::Function,
+    c::CuArray{Float32,2},
+    tol::Float64,
+    i_max::Int,
+    args_solver...
+    ;
+    quiet::Bool=false,
+    track_deltas::Bool=false,
+    check_every::Int=100,
+    c_old::CuArray{Float32,2}=similar(c),
+    diffs::CuArray{Float32,2}=similar(c),  # allocate once
+    kwargs_solver...)::Union{CuArray{Float32,2},Tuple{CuArray{Float32,2},Vector{Float32}}}
+    if track_deltas
+        deltas = Float32[]
+    end
+
+    for i in 1:i_max
+        # Only sync every `check_every` iterations to copy c to c_old and compute delta, otherwise let GPU run asynchronously
+        if i % check_every == 0
+            copyto!(c_old, c)
+        end
+
+        # Update
+        solver!(c, args_solver...; kwargs_solver...)
+
+        # Check convergence every `check_every` iterations
+        if i % check_every == 0
+            # Compute delta on GPU and only sync to CPU for the single scalar value, instead of syncing entire c matrix every iteration
+            delta = delta_cuda!(diffs, c_old, c)
+            if track_deltas
+                push!(deltas, delta)
+            end
+
+            # Stopping condition
+            if delta < tol
+                if !quiet
+                    println("$solver! converged after $i iterations ")
+                end
+
+                if track_deltas
+                    return c, deltas
+                else
+                    return c
+                end
+            end
+        end
+    end
+
+    if !quiet
+        println("$solver! did not converge after $i_max iterations")
+    end
+
+    if track_deltas
+        return c, deltas
+    else
+        return c
+    end
+end
+
+
+"""
+    delta_cuda!(diffs::CuArray{Float32,2}, c_old::CuArray{Float32,2}, c_new::CuArray{Float32,2})
+
+Compute the maximum absolute difference between two CUDA arrays.
+
+# Arguments
+- `diffs::CuArray{Float32,2}`: Preallocated array to store differences
+- `c_old::CuArray{Float32,2}`: Previous concentration field
+- `c_new::CuArray{Float32,2}`: New concentration field
+
+# Returns
+- `Float32`: Maximum absolute difference
+"""
+function delta_cuda!(diffs::CuArray{Float32,2}, c_old::CuArray{Float32,2}, c_new::CuArray{Float32,2})
+    N = size(c_old, 1)
+
+    # 2D configuration
+    threads_per_block = (16, 16)  # 256 threads total per block
+    blocks = (cld(N, 16), cld(N - 2, 16))  # Cover all rows and N-2 columns
+    @cuda threads = threads_per_block blocks = blocks abs_diff_kernel_cuda!(N, c_old, c_new, diffs)
+
+    return maximum(diffs)  # still syncs, but now we call it rarely
+end
+
+
+"""
+    max_abs_diff_kernel_cuda!(c_old::CuDeviceArray{Float32,2}, c_new::CuDeviceArray{Float32,2}, diffs::CuDeviceArray{Float32,2})
+
+CUDA kernel to compute element-wise absolute differences.
+
+# Arguments
+- `c_old::CuDeviceArray{Float32,2}`: Previous concentration field
+- `c_new::CuDeviceArray{Float32,2}`: New concentration field
+- `diffs::CuDeviceArray{Float32,2}`: Output array for differences
+"""
+function abs_diff_kernel_cuda!(N::Int, c_old::CuDeviceArray{Float32,2}, c_new::CuDeviceArray{Float32,2}, diffs::CuDeviceArray{Float32,2})
+    i = threadIdx().x + (blockIdx().x - 1) * blockDim().x
+    j = threadIdx().y + (blockIdx().y - 1) * blockDim().y
+
+    if i > N || j > N - 2 || i == 1 || i == N
+        return
+    end
+
+    if i <= size(c_old, 1) && j <= size(c_old, 2)
+        diffs[i, j] = abs(c_new[i, j] - c_old[i, j])
+    end
+
+    return
 end
 
 
@@ -627,13 +863,15 @@ Cells marked as sinks have their concentration fixed at 0.0 after both passes co
 """
 function c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool})::Matrix{Float64}
     N = size(c, 1)
+    if isodd(N)
+        @warn "Current implementation of c_next_SOR_sink_red_black! assumes an even grid size for proper red-black ordering. Results may be incorrect for odd N."
+    end
     Fo = 0.25 * omega
 
-    do_sink = any(sink_mask)
-
-    # Red pass: update cells where for even rows
+    # Red pass: i+j = even 
+    # Red pass: update cells for even rows, even columns (even + even = even)
     @inbounds for i in 2:2:N-1
-        @inbounds @turbo for j in 2:2:N-1  # Start at 2 step by 2
+        @inbounds @turbo for j in 2:2:N-1
             c[i, j] = Fo * (
                 c[i+1, j] +
                 c[i-1, j] +
@@ -642,9 +880,9 @@ function c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mas
             ) + (1 - omega) * c[i, j]
         end
     end
-    # Red pass: update cells where for uneven rows
+    # Red pass: update cells for uneven rows, uneven columns (odd + odd = even)
     @inbounds for i in 3:2:N-1
-        @inbounds @turbo for j in 3:2:N-1  # Start at 3 step by 2
+        @inbounds @turbo for j in 3:2:N-1
             c[i, j] = Fo * (
                 c[i+1, j] +
                 c[i-1, j] +
@@ -653,29 +891,19 @@ function c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mas
             ) + (1 - omega) * c[i, j]
         end
     end
-
-    # Black pass: update cells where (i+j) is odd
-    @inbounds for i in 2:N-1
-        @inbounds for j in (3-(i%2)):2:N-1  # Start at 2 or 3 based on i (opposite of red), step by 2
-            c[i, j] = Fo * (
-                c[i+1, j] +
-                c[i-1, j] +
-                c[i, j+1] +
-                c[i, j-1]
-            ) + (1 - omega) * c[i, j]
-        end
-    end
-
-    # Do boundary pass - Red cells
-    @inbounds @turbo for j in 2:2:N-1  # Even j values (since i=1 is odd)
+    # Do boundary pass - Red cells (i+j = even) on the boundaries
+    @inbounds @turbo for j in 3:2:N-1
+        # Left boundary
         c[1, j] = Fo * (
             c[2, j] +
             c[N, j] +
             c[1, j+1] +
             c[1, j-1]
         ) + (1 - omega) * c[1, j]
+
     end
-    @inbounds @turbo for j in 3:2:N-1  # Odd j values (since i=N parity depends on N)
+    @inbounds @turbo for j in 2:2:N-1
+        # Right boundary
         c[N, j] = Fo * (
             c[1, j] +
             c[N-1, j] +
@@ -684,8 +912,35 @@ function c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mas
         ) + (1 - omega) * c[N, j]
     end
 
-    # Do boundary pass - Black cells
-    @inbounds @turbo for j in 3:2:N-1  # Odd j values
+    # Apply sink mask after red pass to ensure sinks remain at 0 before black pass updates
+    c[sink_mask] .= 0.0
+
+    # Black pass: i+j = odd
+    # Black pass: update cells for even rows, uneven columns (even + odd = odd)
+    @inbounds for i in 2:2:N-1
+        @inbounds @turbo for j in 3:2:N-1
+            c[i, j] = Fo * (
+                c[i+1, j] +
+                c[i-1, j] +
+                c[i, j+1] +
+                c[i, j-1]
+            ) + (1 - omega) * c[i, j]
+        end
+    end
+    # Black pass: update cells for uneven rows, even columns (odd + even = odd)
+    @inbounds for i in 3:2:N-1
+        @inbounds @turbo for j in 2:2:N-1
+            c[i, j] = Fo * (
+                c[i+1, j] +
+                c[i-1, j] +
+                c[i, j+1] +
+                c[i, j-1]
+            ) + (1 - omega) * c[i, j]
+        end
+    end
+    # Do boundary pass - Black cells (i+j = odd) on the boundaries
+    @inbounds @turbo for j in 2:2:N-1
+        # Left boundary
         c[1, j] = Fo * (
             c[2, j] +
             c[N, j] +
@@ -693,7 +948,8 @@ function c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mas
             c[1, j-1]
         ) + (1 - omega) * c[1, j]
     end
-    @inbounds @turbo for j in 2:2:N-1  # Even j values
+    @inbounds @turbo for j in 3:2:N-1
+        # Right boundary
         c[N, j] = Fo * (
             c[1, j] +
             c[N-1, j] +
@@ -703,16 +959,32 @@ function c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mas
     end
 
     # Apply sink mask after both passes
-    if do_sink
-        c[sink_mask] .= 0.0
-    end
+    c[sink_mask] .= 0.0
 
     return c
 end
 @deprecate c_next_SOR_sink!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool}) c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool})
 
 
-function c_next_SOR_kernel!(c::MtlDeviceMatrix{Float32,1}, sink_mask::MtlDeviceMatrix{Bool,1}, Fo::Float32, omega::Float32, N::Int, color::Int32)
+"""
+    c_next_SOR_kernel_metal!(c::MtlDeviceMatrix{Float32,1}, sink_mask::MtlDeviceMatrix{Bool,1}, Fo::Float32, omega::Float32, N::Int, color::Int32)
+
+Metal GPU kernel for SOR iteration with red-black ordering and sink regions.
+
+# Arguments
+- `c::MtlDeviceMatrix{Float32,1}`: Concentration field on device
+- `sink_mask::MtlDeviceMatrix{Bool,1}`: Boolean mask indicating sink regions on device
+- `Fo::Float32`: Fourier number factor (0.25 * omega)
+- `omega::Float32`: Relaxation parameter
+- `N::Int`: Grid size
+- `color::Int32`: Red-black ordering flag (0 for red cells where i+j is even, 1 for black cells where i+j is odd)
+
+# Notes
+- Uses red-black ordering to avoid race conditions in parallel updates
+- Cells marked as sinks have their concentration fixed at 0.0
+- Periodic boundary conditions in x-direction
+"""
+function c_next_SOR_kernel_metal!(c::MtlDeviceMatrix{Float32,1}, sink_mask::MtlDeviceMatrix{Bool,1}, Fo::Float32, omega::Float32, N::Int, color::Int32)
     i = thread_position_in_grid_2d().x
     j = thread_position_in_grid_2d().y + 1 # Shift j by 1 to account for skipping first and last column
 
@@ -745,6 +1017,25 @@ function c_next_SOR_kernel!(c::MtlDeviceMatrix{Float32,1}, sink_mask::MtlDeviceM
 end
 
 
+"""
+    c_next_SOR_sink_metal!(c::MtlMatrix{Float32}, omega::Float32, sink_mask::MtlMatrix{Bool})::MtlMatrix{Float32}
+
+Compute the next iteration using SOR on Metal GPU with sink regions.
+
+# Arguments
+- `c::MtlMatrix{Float32}`: Concentration field (modified in-place)
+- `omega::Float32`: Relaxation parameter
+- `sink_mask::MtlMatrix{Bool}`: Boolean mask indicating sink regions (true = sink)
+
+# Returns
+- `MtlMatrix{Float32}`: Reference to the updated concentration field
+
+# Notes
+- Uses red-black Gauss-Seidel ordering for in-place updates on GPU
+- Two kernel launches: one for red cells (i+j even), one for black cells (i+j odd)
+- Cells marked as sinks have their concentration fixed at 0.0
+- Periodic boundary conditions in x-direction
+"""
 function c_next_SOR_sink_metal!(c::MtlMatrix{Float32}, omega::Float32, sink_mask::MtlMatrix{Bool})::MtlMatrix{Float32}
     N = size(c, 1)
     Fo = Float32(0.25) * omega
@@ -755,10 +1046,92 @@ function c_next_SOR_sink_metal!(c::MtlMatrix{Float32}, omega::Float32, sink_mask
 
     # Red-black ordering for in-place SOR updates
     # Red pass: update cells where (i+j) is even
-    @metal threads = threads_per_group groups = groups c_next_SOR_kernel!(c, sink_mask, Fo, omega, N, Int32(0))
+    @metal threads = threads_per_group groups = groups c_next_SOR_kernel_metal!(c, sink_mask, Fo, omega, N, Int32(0))
 
     # Black pass: update cells where (i+j) is odd (no sync - let GPU schedule)
-    @metal threads = threads_per_group groups = groups c_next_SOR_kernel!(c, sink_mask, Fo, omega, N, Int32(1))
+    @metal threads = threads_per_group groups = groups c_next_SOR_kernel_metal!(c, sink_mask, Fo, omega, N, Int32(1))
+
+    return c
+end
+
+
+
+"""
+    c_next_SOR_kernel_cuda!(c::CuDeviceArray{Float32,2}, sink_mask::CuDeviceArray{Bool,2}, Fo::Float32, omega::Float32, N::Int, color::Int32)
+
+CUDA kernel for SOR iteration with red-black ordering and sink regions.
+
+# Arguments
+- `c::CuDeviceArray{Float32,2}`: Concentration field
+- `sink_mask::CuDeviceArray{Bool,2}`: Boolean mask indicating sink regions
+- `Fo::Float32`: Fourier number factor
+- `omega::Float32`: Relaxation parameter
+- `N::Int`: Grid size
+- `color::Int32`: Red-black ordering flag (0 for red, 1 for black)
+"""
+function c_next_SOR_kernel_cuda!(c::CuDeviceArray{Float32,2}, sink_mask::CuDeviceArray{Bool,2}, Fo::Float32, omega::Float32, N::Int, color::Int32)
+    i = threadIdx().x + (blockIdx().x - 1) * blockDim().x
+    j = threadIdx().y + (blockIdx().y - 1) * blockDim().y + 1  # Shift j by 1 to account for skipping first and last column
+
+    # Red-black ordering: only update if (i+j) mod 2 matches color
+    if ((i + j) & 1) != color
+        return
+    end
+
+    # Check bounds
+    if i > N || j >= N
+        return
+    end
+
+    # Check mask and exit early if this cell is a sink
+    if sink_mask[i, j]
+        c[i, j] = 0.0f0
+        return
+    end
+
+    i_right = (i == N) ? 1 : i + 1
+    i_left = (i == 1) ? N : i - 1
+
+    c[i, j] = Fo * (
+        c[i_right, j] +
+        c[i_left, j] +
+        c[i, j+1] +
+        c[i, j-1]
+    ) + (1 - omega) * c[i, j]
+    return
+end
+
+
+"""
+    c_next_SOR_sink_cuda!(c::CuArray{Float32,2}, omega::Float32, sink_mask::CuArray{Bool,2})::CuArray{Float32,2}
+
+Compute the next iteration using SOR on CUDA GPU with sink regions.
+
+# Arguments
+- `c::CuArray{Float32,2}`: Concentration field (modified in-place)
+- `omega::Float32`: Relaxation parameter
+- `sink_mask::CuArray{Bool,2}`: Boolean mask indicating sink regions (true = sink)
+
+# Returns
+- `CuArray{Float32,2}`: Reference to the updated concentration field
+
+# Notes
+Uses red-black Gauss-Seidel ordering for in-place updates on GPU. Cells marked as sinks have their concentration fixed at 0.0.
+"""
+function c_next_SOR_sink_cuda!(c::CuArray{Float32,2}, omega::Float32, sink_mask::CuArray{Bool,2})::CuArray{Float32,2}
+    N = size(c, 1)
+    Fo = Float32(0.25) * omega
+
+    # 2D configuration
+    threads_per_block = (16, 16)  # 256 threads total per block
+    blocks = (cld(N, 16), cld(N - 2, 16))  # Cover all rows and N-2 columns
+
+    # Red-black ordering for in-place SOR updates
+    # Red pass: update cells where (i+j) is even
+    @cuda threads = threads_per_block blocks = blocks c_next_SOR_kernel_cuda!(c, sink_mask, Fo, omega, N, Int32(0))
+
+    # Black pass: update cells where (i+j) is odd (no sync - let GPU schedule)
+    @cuda threads = threads_per_block blocks = blocks c_next_SOR_kernel_cuda!(c, sink_mask, Fo, omega, N, Int32(1))
 
     return c
 end
