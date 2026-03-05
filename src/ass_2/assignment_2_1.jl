@@ -1,9 +1,8 @@
 module Assignment_2_1
 
-using Metal
-using Distributions
-using Plots
-using ProgressMeter
+using Metal: MtlMatrix
+using Plots: heatmap
+using BenchmarkTools
 
 # Import local module
 include("../helpers/__init__.jl")
@@ -11,222 +10,91 @@ include("../helpers/__init__.jl")
 # Benchmarking
 using .Helpers.Benchmark: bench_funcs
 
-
 # Diffusion helpers
-using .Helpers.Diffusion: solve_until_tol
+using .Helpers.Diffusion: solve_until_tol, c_next_SOR_sink!, c_next_SOR_sink_red_black!, solve_until_tol_metal!, c_next_SOR_sink_metal!
+using .Helpers.DLAUtil: run_diffusion_limited_aggregation
 
 # Plotting
 using .Helpers.SaveFig: savefig_auto_folder
 using .Helpers: get_heatmap_kwargs
-using .Helpers.DistributedGIF: gif_slow, distributed_gif
 
 
-function c_next_SOR_sink!(c::Matrix{Float64}, omega::Float64; sink_mask::Matrix{Bool}=zeros(Bool, size(c)))::Matrix{Float64}
-    N = size(c, 1)
-    Fo = 0.25 * omega
-
-    do_sink = any(sink_mask)
-
-    # # Apply sink mask
-    if do_sink
-        c[sink_mask] .= 0.0
-    end
-
-    @inbounds for i in 1:N
-        @inbounds for j in 2:N-1
-            # If this cell is a sink, set concentration to 0 and skip update
-            if do_sink && sink_mask[i, j]
-                continue
-            end
-
-            i_right = (i == N) ? 1 : i + 1
-            i_left = (i == 1) ? N : i - 1
-
-            c[i, j] = Fo * (
-                c[i_right, j] +
-                c[i_left, j] +
-                c[i, j+1] +
-                c[i, j-1]
-            ) + (1 - omega) * c[i, j]
-        end
-    end
-
-    return c
-end
-
-function c_next_SOR_sink_metal!(c::MtlArray{Float32,2}, omega::Float64; sink_mask::MtlArray{Bool,2}=MtlArray(zeros(Bool, size(c))))::MtlArray{Float32,2}
-    N = size(c, 1)
-    Fo = Float32(0.25 * omega)
-    omega_f = Float32(omega)
-
-    do_sink = any(sink_mask)
-
-    if do_sink
-        c[sink_mask] .= 0.0f0
-    end
-
-    # 2D configuration
-    threads_per_group = (16, 16)  # 256 threads total per group
-    groups = (cld(N, 16), cld(N - 2, 16))  # Cover all rows and N-2 columns
-
-    # Red-black ordering for in-place SOR updates
-    # Red pass: update cells where (i+j) is even
-    @metal threads = threads_per_group groups = groups c_next_SOR_kernel!(c, sink_mask, Fo, omega_f, N, do_sink, Int32(0))
-
-    # Black pass: update cells where (i+j) is odd (no sync - let GPU schedule)
-    @metal threads = threads_per_group groups = groups c_next_SOR_kernel!(c, sink_mask, Fo, omega_f, N, do_sink, Int32(1))
-
-    # Only sync at the end
-    Metal.synchronize()
+DEFAULT_PLOT_OUTPUT_DIR = "plots/ass_2"
 
 
-    return c
-end
-
-function c_next_SOR_kernel!(c::MtlDeviceMatrix{Float32,1}, sink_mask::MtlDeviceMatrix{Bool,1}, Fo::Float32, omega::Float32, N::Int, do_sink::Bool, color::Int32)
-    i = thread_position_in_grid_2d().x
-    j = thread_position_in_grid_2d().y + 1  # Shift j by 1 to account for skipping first and last column
-
-    # Check bounds
-    if i > N || j > N - 1 || i < 1 || j < 2
-        return
-    end
-
-    # Red-black ordering: only update if (i+j) mod 2 matches color
-    if (i + j) % 2 != color
-        return
-    end
-
-    if do_sink && sink_mask[i, j]
-        c[i, j] = 0.0f0
-        return
-    end
-
-    i_right = (i == N) ? 1 : i + 1
-    i_left = (i == 1) ? N : i - 1
-
-    c[i, j] = Fo * (
-        c[i_right, j] +
-        c[i_left, j] +
-        c[i, j+1] +
-        c[i, j-1]
-    ) + (1 - omega) * c[i, j]
-    return
-end
-
-
-function main(; use_GPU::Bool=false, do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, plot_output_dir::String="plots/ass_2")
-    if do_bench
-        N = 100
-        L = 1.0
-        omega = 1.85
-        c_0 = zeros(N, N)
-        c_0[:, end] .= 1
-        sink_mask = zeros(Bool, N, N)
-        sink_mask[50, 1] = true
-
-        bench_funcs([c_next_SOR_sink!], c_0, omega, sink_mask=sink_mask)
-
-        if use_GPU
-            c_0 = MtlArray(Matrix{Float32}(c_0))
-            sink_mask = MtlArray(sink_mask)
-            bench_funcs([c_next_SOR_sink_metal!], c_0, omega, sink_mask=sink_mask)
-        end
-    end
-
-
-    N::Int = 100
-    L = 1.0
-    eta = 1.5
-    tol = 10^(-6)
-    i_max = 10_000
-    omega_sor = 1.85
-
-    # Instantiate starting conditions
-    # Source
-    c_source = zeros(Bool, N, N)
-    c_source[:, end] .= 1
-    # Sink
-    c_sink_template = zeros(Bool, N, N)
-    # Single seed
-    c_sink_template[50, 1] = true
-    c_sink = use_GPU ? MtlArray(copy(c_sink_template)) : copy(c_sink_template)
-    # c_0
-    c = use_GPU ? MtlArray(Matrix{Float32}(c_source)) : Matrix{Float64}(c_source)
-    @info "Created initial conditions"
-
-
-    frames = 1000
-    plots = Vector{Plots.Plot{Plots.GRBackend}}(undef, frames)
+function run_bench(; N::Int=100, L::Float64=1.0, omega::Float64=1.85, tol::Float64=10^-6, use_GPU::Bool=false, plot_output_dir::String=DEFAULT_PLOT_OUTPUT_DIR)
+    # Create initial conditions
+    c_0 = zeros(N, N)
+    c_0[:, end] .= 1
+    sink_mask = zeros(Bool, N, N)
+    sink_mask[N÷2, 1] = true
     heatmap_kwargs = get_heatmap_kwargs(N, L)
+    savefig_auto_folder(heatmap(c_0'; heatmap_kwargs...), joinpath(plot_output_dir, "bench_c_0_heatmap.png"))
 
-    # Pre-allocate CPU buffers to avoid repeated allocations
-    cpu_sink = Array(c_sink)
-    cpu_c = Array(c)
+    # Define testable functions
+    test_funcs = Vector{Function}([c_next_SOR_sink_red_black!, c_next_SOR_sink!])
 
-    @showprogress "Solving frames" for i in 1:1:frames
-        if use_GPU
-            c, _deltas = solve_until_tol(c_next_SOR_sink_metal!, c, tol, i_max, omega_sor; sink_mask=c_sink, quiet=true)
-            # Transfer from GPU once per frame
-            copyto!(cpu_c, c)
-            copyto!(cpu_sink, c_sink)
-        else
-            c, _deltas = solve_until_tol(c_next_SOR_sink!, c, tol, i_max, omega_sor; sink_mask=c_sink, quiet=true)
-            cpu_c = c
-            cpu_sink = c_sink
-        end
-
-        neighbor_mask = falses(size(c_sink))
-        # Copy source stamp to neighbor candidates
-        neighbor_mask[2:end, :] .|= cpu_sink[1:end-1, :]    # below source
-        neighbor_mask[1:end-1, :] .|= cpu_sink[2:end, :]    # above source
-        neighbor_mask[:, 2:end] .|= cpu_sink[:, 1:end-1]    # right of source
-        neighbor_mask[:, 1:end-1] .|= cpu_sink[:, 2:end]    # left of source
-        # Exclude original source cells from neighbors
-        neighbor_mask .&= .!cpu_sink
-
-        candidates = findall(neighbor_mask)
-        # diffusion probabilities are proportional to concentration at candidate cells
-        # Raise to the power eta, control floating point issues by maxing with 0.0
-        probabilities = max.(cpu_c[candidates], 0.0) .^ eta
-        # Normalize
-        probabilities ./= sum(probabilities)
-        # Choose candidate cell based on probabilities
-        chosen_index = rand(Categorical(probabilities))
-        chosen_cell = candidates[chosen_index]
-        # Not allowed to change source into sink
-        if !c_source[chosen_cell]
-            # Strike the lightning: set chosen cell as new source
-            cpu_sink[chosen_cell] = true
-            # Update GPU array only if using GPU
-            if use_GPU
-                copyto!(c_sink, cpu_sink)
-            end
-        end
-
-        if do_gif
-            c_plot = max.(min.(cpu_c + cpu_sink, 1.0), 0)  # Cap concentration at 1.0 for better visualization
-            p = heatmap(c_plot'; heatmap_kwargs...)
-            plots[i] = p
-        end
+    # Test single iterations
+    bench_funcs(test_funcs, copy(c_0), omega, sink_mask)
+    # Test convergence
+    for func in test_funcs
+        @info "Benchmarking $func convergence"
+        # Verify convergence rate
+        c_new, _deltas = solve_until_tol(func, c_0, tol, 10_000, omega, sink_mask, quiet=false)
+        # Save test image of equilibrium state
+        savefig_auto_folder(heatmap(c_new'; heatmap_kwargs...), joinpath(plot_output_dir, "bench_c_0_$(func)_equilibrium_heatmap.png"))
+        # Benchmark full convergence
+        display(@benchmark solve_until_tol($func, $c_0, $tol, 10_000, $omega, $sink_mask, quiet=true))
+        print("\n\n")
     end
 
-    @time "Saved final state" begin
-        c_plot = max.(min.(cpu_c + cpu_sink, 1.0), 0)  # Cap concentration at 1.0 for better visualization
-        p = heatmap(c_plot'; heatmap_kwargs...)
-        savefig_auto_folder(p, joinpath(plot_output_dir, "diffusion_limited_aggregation_end.png"))
+    if use_GPU
+        c_0 = MtlMatrix(Matrix{Float32}(c_0))
+        sink_mask = MtlMatrix(Bool.(sink_mask))
+        bench_funcs(Vector{Function}([c_next_SOR_sink_metal!]), copy(c_0), Float32(omega), sink_mask)
+        @info "Benchmarking $c_next_SOR_sink_metal! convergence on GPU"
+        # Verify convergence rate
+        c_new = solve_until_tol_metal!(c_next_SOR_sink_metal!, copy(c_0), tol, 10_000, Float32(omega), sink_mask, quiet=false)
+        # Save test image of equilibrium state
+        savefig_auto_folder(heatmap(Array(c_new)'; heatmap_kwargs...), joinpath(plot_output_dir, "bench_c_0_$(c_next_SOR_sink_metal!)_equilibrium_heatmap.png"))
+        # Benchmark full convergence on GPU
+        display(@benchmark solve_until_tol_metal!($c_next_SOR_sink_metal!, copy($c_0), $tol, 10_000, Float32($omega), $sink_mask, quiet=true))
+        print("\n\n")
+    end
+end
+
+
+function main(; use_GPU::Bool=false, do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, plot_output_dir::String=DEFAULT_PLOT_OUTPUT_DIR)
+    N::Int = 100        # Grid size
+    L = 1.0             # Physical size of the domain
+    omega_sor = 1.91    # Over-relaxation parameter for SOR
+    tol = 10^(-3)       # Convergence tolerance
+    eta = 1.5           # Some parameter (not specified)
+    i_max = 10_000      # Maximum number of iterations
+    frames = 1000       # Number of frames to save
+
+    if do_bench
+        run_bench(; N=N, L=L, omega=omega_sor, tol=tol, use_GPU=use_GPU, plot_output_dir=plot_output_dir)
     end
 
-    if do_gif
-        gif_slow(plots, joinpath(plot_output_dir, "diffusion_limited_aggregation.gif"), fps=60)
-    end
-
-
+    @time "Finished diffusion limited aggregation" run_diffusion_limited_aggregation(
+        N,
+        L,
+        tol,
+        frames
+        ;
+        i_max_conv=i_max,
+        omega_sor=omega_sor,
+        eta=eta,
+        use_GPU=use_GPU,
+        do_gif=do_gif,
+        plot_output_dir=plot_output_dir
+    )
 
     # TODO: find optimal omega (?not possible due to different size of mask each frame)
     # TODO: experiment with eta
 
-
+    return
 end
 
 end # module

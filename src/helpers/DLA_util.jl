@@ -23,7 +23,7 @@ include("get_heatmap_kwargs.jl")
 function superimpose_c_sink(c::FloatMatrix, c_sink::Matrix{Bool})::FloatMatrix
     c_plot = copy(c)
     c_plot[c_sink] .= 1.0  # Cap concentration inside [0.0, 1.0] for better visualization
-    return max.(min.(c_plot, 1.0), 0.0)
+    return clamp!(c_plot, 0.0, 1.0)
 end
 
 
