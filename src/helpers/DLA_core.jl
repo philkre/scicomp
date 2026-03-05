@@ -142,16 +142,28 @@ function choose_candidate_monte_carlo(
             continue
         end
 
+        # Double check if we are on a sink cell, if so, restart (can happen due to teleporting)
+        if cpu_sink[pos]
+            pos = rand(findall(c_source))
+            continue
+        end
+
         neighbors = get_neighboring_cells(pos; loop_x=true, Ni=Ni)
-        neighboring_sinks = findall(cpu_sink[filter((p) -> p[2] >= 1 && p[2] <= Nj, neighbors)])
+        # Filter neighbors that are inside the grid in y-direction
+        neighbors_inside = filter((p) -> p[2] >= 1 && p[2] <= Nj, neighbors)
+        # Find which of the neighboring cells are sinks
+        neighboring_sinks = findall(cpu_sink[neighbors_inside])
 
         # Check if position borders a sink cell, if so, return it with probability p_s
         if !isempty(neighboring_sinks) && rand() < p_s
             return pos
         end
 
-        # Move to a random neighboring cell
-        pos = rand(neighbors)
+        # Find all neighbors that are not sinks, allow teleporting in y-direction 
+        neighbors_not_sinks = filter((p) -> p[2] < 1 || p[2] > Nj || !cpu_sink[p], neighbors)
+
+        # Move to a random neighboring, not allowed to move onto a sink cell, but can teleport in x-direction, will restart if teleporting in y-direction
+        pos = rand(neighbors_not_sinks)
     end
 
     error("Didn't find candidate cell in $i_max iterations, consider increasing i_max or check if there are any valid candidates at all.")
