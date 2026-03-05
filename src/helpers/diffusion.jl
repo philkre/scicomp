@@ -1165,58 +1165,6 @@ end
 @deprecate c_next_SOR_sink!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool}) c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool})
 
 
-function c_next_SOR_kernel!(c::MtlDeviceMatrix{Float32,1}, sink_mask::MtlDeviceMatrix{Bool,1}, Fo::Float32, omega::Float32, N::Int, color::Int32)
-    i = thread_position_in_grid_2d().x
-    j = thread_position_in_grid_2d().y + 1 # Shift j by 1 to account for skipping first and last column
-
-    # Red-black ordering: only update if (i+j) mod 2 matches color
-    if ((i + j) & 1) != color
-        return
-    end
-
-    # Check bound
-    if i > N || j >= N
-        return
-    end
-
-    # Check mask and exit early if this cell is a sink
-    if sink_mask[i, j]
-        c[i, j] = 0.0f0
-        return
-    end
-
-    i_right = (i == N) ? 1 : i + 1
-    i_left = (i == 1) ? N : i - 1
-
-    c[i, j] = Fo * (
-        c[i_right, j] +
-        c[i_left, j] +
-        c[i, j+1] +
-        c[i, j-1]
-    ) + (1 - omega) * c[i, j]
-    return
-end
-
-
-function c_next_SOR_sink_metal!(c::MtlMatrix{Float32}, omega::Float32, sink_mask::MtlMatrix{Bool})::MtlMatrix{Float32}
-    N = size(c, 1)
-    Fo = Float32(0.25) * omega
-
-    # 2D configuration
-    threads_per_group = (16, 16)  # 256 threads total per group
-    groups = (cld(N, 16), cld(N - 2, 16))  # Cover all rows and N-2 columns
-
-    # Red-black ordering for in-place SOR updates
-    # Red pass: update cells where (i+j) is even
-    @metal threads = threads_per_group groups = groups c_next_SOR_kernel!(c, sink_mask, Fo, omega, N, Int32(0))
-
-    # Black pass: update cells where (i+j) is odd (no sync - let GPU schedule)
-    @metal threads = threads_per_group groups = groups c_next_SOR_kernel!(c, sink_mask, Fo, omega, N, Int32(1))
-
-    return c
-end
-
-
 """
     c_next_SOR_kernel_metal!(c::MtlDeviceMatrix{Float32,1}, sink_mask::MtlDeviceMatrix{Bool,1}, Fo::Float32, omega::Float32, N::Int, color::Int32)
 
