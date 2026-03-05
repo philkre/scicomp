@@ -402,7 +402,7 @@ Solve the diffusion equation iteratively until convergence or maximum iterations
 # Returns
 - `Tuple{Union{Matrix{Float64},MtlArray{Float32,2}}, Vector{Float64}}`: Final concentration field and convergence history
 """
-function solve_until_tol(solver::Function, c_initial::Union{Matrix{Float64},MtlArray{Float32,2}}, tol::Float64, max_iters::Int, args_solver...; quiet::Bool=false, track_deltas::Bool=true, kwargs_solver...)::Tuple{Union{Matrix{Float64},MtlArray{Float32,2}},Vector{Float64}}
+function solve_until_tol(solver::Function, c_initial::Union{Matrix{Float64},MtlArray{Float32,2}}, tol::Float64, max_iters::Int, args_solver...; quiet::Bool=false, track_deltas::Bool=true, kwargs_solver...)::Union{Tuple{Union{Matrix{Float64},MtlArray{Float32,2}},Vector{Float64}},Union{Matrix{Float64},MtlArray{Float32,2}}}
     c_old = copy(c_initial)
     c_new = copy(c_initial)
 
@@ -422,7 +422,11 @@ function solve_until_tol(solver::Function, c_initial::Union{Matrix{Float64},MtlA
             if !quiet
                 println("$solver converged after $iter iterations ")
             end
-            return c_new, deltas
+            if track_deltas
+                return c_new, deltas
+            else
+                return c_new
+            end
         end
 
         copyto!(c_old, c_new)
@@ -432,7 +436,11 @@ function solve_until_tol(solver::Function, c_initial::Union{Matrix{Float64},MtlA
         println("$solver did not converge after $max_iters iterations")
     end
 
-    return c_new, deltas
+    if track_deltas
+        return c_new, deltas
+    else
+        return c_new
+    end
 end
 
 
@@ -813,6 +821,9 @@ function c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mas
             c[N, j-1]
         ) + (1 - omega) * c[N, j]
     end
+
+    # Apply sink mask after red pass to ensure sinks remain at 0 before black pass updates
+    c[sink_mask] .= 0.0
 
     # Black pass: i+j = odd
     # Black pass: update cells for even rows, uneven columns (even + odd = odd)
