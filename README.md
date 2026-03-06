@@ -33,6 +33,7 @@ julia --project=. -e "using Pkg; Pkg.instantiate()"
 ```
 
 ### Run
+Note: When not ran on macOS multiple metal.jl errors will be printed, but these are just used for GPU optimization on macOS and this will not influence the results  
 ```bash 
 julia --project=. assignment_2.jl
 ```
