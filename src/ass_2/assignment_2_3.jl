@@ -20,8 +20,8 @@ function main(; do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, 
     dx = 1.0        # Spatial step
     Du = 0.16       # Diffusion coefficient for U
     Dv = 0.08       # Diffusion coefficient for V  
-    f = 0.035       # Feed rate
-    k = 0.060       # Kill rate
+    f = 0.03       # Feed rate
+    k = 0.055       # Kill rate
     T = 10000.0     # Total simulation time
 
     # Initial conditions
@@ -66,8 +66,8 @@ function main(; do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, 
 
     # Try different parameter regimes
     @info "Running scenario 2: Stripes pattern (different f, k)"
-    f2 = 0.022
-    k2 = 0.051
+    f2 = 0.035
+    k2 = 0.060
     @time "Ran simulation 2" begin
         u_hist2, v_hist2, t_hist2 = simulate_gray_scott(
             N,
@@ -100,7 +100,7 @@ function main(; do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, 
         @info "Animation saved to: $filename_gif_stripes"
     end
 
-    @info "Running scenario 3: Waves pattern"
+    @info "Running scenario 3: Flatten pattern"
     f3 = 0.014
     k3 = 0.050
     @time "Ran simulation 3" begin
@@ -120,17 +120,17 @@ function main(; do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, 
             save_every=50
         )
     end
-    # Plot final state for waves pattern
-    filename_final_state_waves = joinpath(plot_output_dir, "gray_scott_final_waves.png")
-    p_waves = plot_gray_scott_state(u_hist3[end], v_hist3[end], t_hist3[end]; title_prefix="Gray-Scott (Waves)")
-    savefig_auto_folder(p_waves, filename_final_state_waves)
-    @info "Final state (waves pattern) saved to: $(filename_final_state_waves)"
+    # Plot final state for flatten pattern
+    filename_final_state_flatten = joinpath(plot_output_dir, "gray_scott_final_flatten.png")
+    p_flatten = plot_gray_scott_state(u_hist3[end], v_hist3[end], t_hist3[end]; title_prefix="Gray-Scott (flatten)")
+    savefig_auto_folder(p_flatten, filename_final_state_flatten)
+    @info "Final state (flatten pattern) saved to: $(filename_final_state_flatten)"
     # Optionally create GIF animation of the simulation
     if do_gif
-        filename_gif_waves = joinpath(plot_output_dir, "gray_scott_waves.gif")
-        plots_waves = [plot_gray_scott_state(u_hist3[i], v_hist3[i], t_hist3[i]; title_prefix="Gray-Scott (Waves)", L=L) for i in eachindex(t_hist3)]
-        distributed_gif(plots_waves, filename_gif_waves; fps=60, do_palette=true, width=1200)
-        @info "Animation saved to: $filename_gif_waves"
+        filename_gif_flatten = joinpath(plot_output_dir, "gray_scott_flatten.gif")
+        plots_flatten = [plot_gray_scott_state(u_hist3[i], v_hist3[i], t_hist3[i]; title_prefix="Gray-Scott (flatten)", L=L) for i in eachindex(t_hist3)]
+        distributed_gif(plots_flatten, filename_gif_flatten; fps=60, do_palette=true, width=1200)
+        @info "Animation saved to: $filename_gif_flatten"
     end
 
     return
