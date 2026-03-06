@@ -11,7 +11,21 @@ using .Helpers.DLAUtil: run_diffusion_limited_aggregation
 DEFAULT_PLOT_OUTPUT_DIR = "plots/ass_2"
 
 
-function main(; use_GPU::Bool=false, do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, plot_output_dir::String=DEFAULT_PLOT_OUTPUT_DIR)
+function main(;
+    use_GPU::Bool=false,
+    backend::Symbol=(use_GPU ? :metal : :cpu),
+    solver::Symbol=:rb_sor,
+    mg_ncycles::Int=8,
+    mg_levels::Int=0,
+    mg_pre_sweeps::Int=2,
+    mg_post_sweeps::Int=2,
+    mg_coarse_sweeps::Int=30,
+    mg_smoother::Symbol=:rb_sor,
+    do_bench::Bool=false,
+    do_gif::Bool=false,
+    do_cache::Bool=false,
+    plot_output_dir::String=DEFAULT_PLOT_OUTPUT_DIR,
+)
     N::Int = 100        # Grid size
     L = 1.0             # Physical size of the domain
     omega_sor = 1.91    # Over-relaxation parameter for SOR
@@ -32,9 +46,16 @@ function main(; use_GPU::Bool=false, do_bench::Bool=false, do_gif::Bool=false, d
         tol,
         frames; i_max_conv=i_max,
         omega_sor=omega_sor,
+        solver=solver,
+        backend=backend,
+        mg_ncycles=mg_ncycles,
+        mg_levels=mg_levels,
+        mg_pre_sweeps=mg_pre_sweeps,
+        mg_post_sweeps=mg_post_sweeps,
+        mg_coarse_sweeps=mg_coarse_sweeps,
+        mg_smoother=mg_smoother,
         p_s=p_s,
         candidate_picker=choose_candidate_monte_carlo,
-        use_GPU=use_GPU,
         do_gif=do_gif,
         plot_output_dir=plot_output_dir
     )
