@@ -1,6 +1,7 @@
 module DLAUtil
 
 using Metal: MtlMatrix, PrivateStorage
+using CUDA: CuArray
 using ProgressMeter: @showprogress
 using Printf: @sprintf
 using Plots: heatmap, Plot, GRBackend
@@ -41,10 +42,17 @@ function run_diffusion_limited_aggregation(
     ;
     i_max_conv::Int=10_000,
     omega_sor::Float64,
+    solver::Symbol=:rb_sor,
+    backend::Symbol=:cpu,
     eta::Union{Float64,Nothing}=nothing,
     p_s::Union{Float64,Nothing}=nothing,
     candidate_picker::Function=choose_candidate,
-    use_GPU::Bool=false,
+    mg_ncycles::Int=8,
+    mg_levels::Int=0,
+    mg_pre_sweeps::Int=2,
+    mg_post_sweeps::Int=2,
+    mg_coarse_sweeps::Int=30,
+    mg_smoother::Symbol=:rb_sor,
     do_gif::Bool=false,
     plot_output_dir::String="plots")
     # Instantiate starting conditions
@@ -59,20 +67,27 @@ function run_diffusion_limited_aggregation(
     # Start with equilibrium solution of initial conditions
     c = c_anal_2d(N)
 
-    c_old::Union{MtlMatrix{Float32,PrivateStorage},Nothing} = nothing
-    diffs::Union{MtlMatrix{Float32,PrivateStorage},Nothing} = nothing
+    c_old = nothing
+    diffs = nothing
 
-    if use_GPU
+    if backend == :metal
         c_sink = MtlMatrix(c_sink)
         c = MtlMatrix(Matrix{Float32}(c))
         # Pre allocate GPU matrices
         c_old = similar(c)
         diffs = similar(c)
+    elseif backend == :cuda
+        c_sink = CuArray(c_sink)
+        c = CuArray(Matrix{Float32}(c))
+        c_old = similar(c)
+        diffs = similar(c)
+    elseif backend != :cpu
+        throw(ArgumentError("Invalid backend=$backend. Valid options: :cpu, :metal, :cuda"))
     end
 
     # Allocate once
-    cpu_c = Array(c)
-    cpu_sink = Array(c_sink)
+    cpu_c = Matrix{Float64}(Array(c))
+    cpu_sink = Matrix{Bool}(Array(c_sink))
 
     @info "Created initial conditions"
 
@@ -92,10 +107,17 @@ function run_diffusion_limited_aggregation(
             tol=tol,
             i_max_conv=i_max_conv,
             omega_sor=omega_sor,
+            solver=solver,
+            backend=backend,
             eta=eta,
             p_s=p_s,
             candidate_picker=candidate_picker,
-            use_GPU=use_GPU,
+            mg_ncycles=mg_ncycles,
+            mg_levels=mg_levels,
+            mg_pre_sweeps=mg_pre_sweeps,
+            mg_post_sweeps=mg_post_sweeps,
+            mg_coarse_sweeps=mg_coarse_sweeps,
+            mg_smoother=mg_smoother,
             c_old=c_old,
             diffs=diffs
         )

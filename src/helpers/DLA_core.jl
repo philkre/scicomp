@@ -1,14 +1,17 @@
 module DLACore
 
 using Metal: MtlMatrix, PrivateStorage
+using CUDA: CuArray
 using Distributions: Categorical
 
 # Diffusion helpers
 include("diffusion.jl")
-using .Diffusion: solve_until_tol, c_next_SOR_sink_red_black!, solve_until_tol_metal!, c_next_SOR_sink_metal!
+using .Diffusion: solve_until_tol, c_next_SOR_sink!, c_next_SOR_sink_red_black!, solve_until_tol_metal!, c_next_SOR_sink_metal!, solve_until_tol_cuda!, c_next_SOR_sink_cuda!, laplace_multigrid!
 
 
 FloatMatrix = Union{Matrix{Float64},Matrix{Float32}}
+ConcentrationField = Union{Matrix{Float64},MtlMatrix{Float32,PrivateStorage},CuArray{Float32,2}}
+SinkField = Union{Matrix{Bool},MtlMatrix{Bool,PrivateStorage},CuArray{Bool,2}}
 
 
 """
@@ -183,15 +186,16 @@ Perform one step of diffusion-limited aggregation (DLA) simulation.
 - `cpu_sink::Matrix{Bool}`: CPU copy of sink mask
 
 # Keyword Arguments
-- `tol::Float64`: Convergence tolerance for SOR solver (default: 1e-6)
-- `i_max_conv::Int`: Maximum iterations for SOR solver (default: 10,000)
-- `omega_sor::Float64`: Relaxation parameter for SOR (default: 1.9)
+- `tol::Float64`: Convergence tolerance for iterative solve (default: 1e-6)
+- `i_max_conv::Int`: Maximum iterations for direct SOR solves (default: 10,000)
+- `omega_sor::Float64`: Relaxation parameter (default: 1.9)
+- `solver::Symbol`: `:sor`, `:rb_sor`, or `:multigrid` (default: `:rb_sor`)
+- `backend::Symbol`: `:cpu`, `:metal`, or `:cuda` (default: `:cpu`)
 - `eta::Union{Float64,Nothing}`: Exponent for concentration-based candidate selection
 - `p_s::Union{Float64,Nothing}`: Sticking probability for Monte Carlo candidate selection
 - `candidate_picker::Function`: Function to select next aggregation site (default: choose_candidate)
-- `use_GPU::Bool`: Use Metal GPU acceleration if available (default: false)
-- `c_old::Union{MtlMatrix{Float32,PrivateStorage},Nothing}`: Preallocated array for GPU solver
-- `diffs::Union{MtlMatrix{Float32,PrivateStorage},Nothing}`: Preallocated array for GPU solver
+- `mg_ncycles`, `mg_levels`, `mg_pre_sweeps`, `mg_post_sweeps`, `mg_coarse_sweeps`, `mg_smoother`: Multigrid controls
+- `c_old`, `diffs`: Optional preallocated GPU work arrays for convergence checks
 
 # Notes
 1. Solves steady-state diffusion equation with current sink configuration using SOR
@@ -206,8 +210,8 @@ This implements one iteration of the DLA process:
 - Aggregate selected cell into the growing structure
 """
 function diffusion_limited_aggregation_step!(
-    c::Union{Matrix{Float64},MtlMatrix{Float32,PrivateStorage}},
-    c_sink::Union{Matrix{Bool},MtlMatrix{Bool,PrivateStorage}},
+    c::ConcentrationField,
+    c_sink::SinkField,
     c_source::Matrix{Bool},
     cpu_c::FloatMatrix,
     cpu_sink::Matrix{Bool}
@@ -215,16 +219,62 @@ function diffusion_limited_aggregation_step!(
     tol::Float64=1e-6,
     i_max_conv::Int=10_000,
     omega_sor::Float64=1.9,
+    solver::Symbol=:rb_sor,
+    backend::Symbol=:cpu,
     eta::Union{Float64,Nothing}=nothing,
     p_s::Union{Float64,Nothing}=nothing,
     candidate_picker::Function=choose_candidate,
-    use_GPU::Bool=false,
-    c_old::Union{MtlMatrix{Float32,PrivateStorage},Nothing}=nothing,
-    diffs::Union{MtlMatrix{Float32,PrivateStorage},Nothing}=nothing)
-    if use_GPU
-        copyto!(cpu_c, solve_until_tol_metal!(c_next_SOR_sink_metal!, c, tol, i_max_conv, Float32(omega_sor), c_sink; check_every=25, c_old=c_old, diffs=diffs, track_deltas=false, quiet=true))
+    mg_ncycles::Int=8,
+    mg_levels::Int=0,
+    mg_pre_sweeps::Int=2,
+    mg_post_sweeps::Int=2,
+    mg_coarse_sweeps::Int=30,
+    mg_smoother::Symbol=:rb_sor,
+    c_old=nothing,
+    diffs=nothing)
+    if backend ∉ (:cpu, :metal, :cuda)
+        throw(ArgumentError("Invalid backend=$backend. Valid options: :cpu, :metal, :cuda"))
+    end
+
+    if solver == :multigrid
+        c_cpu = Matrix{Float64}(cpu_c)
+        laplace_multigrid!(
+            c_cpu;
+            sink_indices=findall(cpu_sink),
+            omega=omega_sor,
+            smoother=mg_smoother,
+            ncycles=mg_ncycles,
+            levels=mg_levels,
+            pre_sweeps=mg_pre_sweeps,
+            post_sweeps=mg_post_sweeps,
+            coarse_sweeps=mg_coarse_sweeps,
+            tol=tol,
+            backend=backend,
+        )
+        copyto!(cpu_c, c_cpu)
+        if backend == :metal || backend == :cuda
+            copyto!(c, Matrix{Float32}(c_cpu))
+            copyto!(c_sink, cpu_sink)
+        end
+    elseif backend == :metal
+        if solver != :rb_sor
+            throw(ArgumentError("backend=:metal supports only solver=:rb_sor or solver=:multigrid"))
+        end
+        cpu_c .= Array(solve_until_tol_metal!(c_next_SOR_sink_metal!, c, tol, i_max_conv, Float32(omega_sor), c_sink; check_every=25, c_old=c_old, diffs=diffs, track_deltas=false, quiet=true))
+    elseif backend == :cuda
+        if solver != :rb_sor
+            throw(ArgumentError("backend=:cuda supports only solver=:rb_sor or solver=:multigrid"))
+        end
+        cpu_c .= Array(solve_until_tol_cuda!(c_next_SOR_sink_cuda!, c, tol, i_max_conv, Float32(omega_sor), c_sink; check_every=25, c_old=c_old, diffs=diffs, track_deltas=false, quiet=true))
     else
-        c = solve_until_tol(c_next_SOR_sink_red_black!, c, tol, i_max_conv, omega_sor, c_sink; track_deltas=false, quiet=true)
+        solver_fn = if solver == :rb_sor
+            c_next_SOR_sink_red_black!
+        elseif solver == :sor
+            c_next_SOR_sink!
+        else
+            throw(ArgumentError("Invalid solver=$solver for backend=:cpu. Valid options: :sor, :rb_sor, :multigrid"))
+        end
+        c = solve_until_tol(solver_fn, c, tol, i_max_conv, omega_sor, c_sink; track_deltas=false, quiet=true)
         copyto!(cpu_c, c)
     end
     chosen_cell::CartesianIndex{2} = candidate_picker(cpu_c, cpu_sink; eta=eta, p_s=p_s, c_source=c_source)

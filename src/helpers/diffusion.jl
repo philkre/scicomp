@@ -975,107 +975,39 @@ Cells marked as sinks have their concentration fixed at 0.0 after both passes co
 """
 function c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool})::Matrix{Float64}
     N = size(c, 1)
-    if isodd(N)
-        @warn "Current implementation of c_next_SOR_sink_red_black! assumes an even grid size for proper red-black ordering. Results may be incorrect for odd N."
-    end
     Fo = 0.25 * omega
 
-    # Red pass: i+j = even 
-    # Red pass: update cells for even rows, even columns (even + even = even)
-    @inbounds for i in 2:2:N-1
-        @inbounds @turbo for j in 2:2:N-1
-            c[i, j] = Fo * (
-                c[i+1, j] +
-                c[i-1, j] +
-                c[i, j+1] +
-                c[i, j-1]
-            ) + (1 - omega) * c[i, j]
-        end
-    end
-    # Red pass: update cells for uneven rows, uneven columns (odd + odd = even)
-    @inbounds for i in 3:2:N-1
-        @inbounds @turbo for j in 3:2:N-1
-            c[i, j] = Fo * (
-                c[i+1, j] +
-                c[i-1, j] +
-                c[i, j+1] +
-                c[i, j-1]
-            ) + (1 - omega) * c[i, j]
-        end
-    end
-    # Do boundary pass - Red cells (i+j = even) on the boundaries
-    @inbounds @turbo for j in 3:2:N-1
-        # Left boundary
-        c[1, j] = Fo * (
-            c[2, j] +
-            c[N, j] +
-            c[1, j+1] +
-            c[1, j-1]
-        ) + (1 - omega) * c[1, j]
+    # Parity-based red-black sweep valid for both even and odd N.
+    @inbounds for color in 0:1
+        for j in 2:N-1
+            i_start = if color == 0
+                isodd(j) ? 1 : 2
+            else
+                isodd(j) ? 2 : 1
+            end
 
-    end
-    @inbounds @turbo for j in 2:2:N-1
-        # Right boundary
-        c[N, j] = Fo * (
-            c[1, j] +
-            c[N-1, j] +
-            c[N, j+1] +
-            c[N, j-1]
-        ) + (1 - omega) * c[N, j]
-    end
+            for i in i_start:2:N
+                if sink_mask[i, j]
+                    continue
+                end
 
-    # Apply sink mask after red pass to ensure sinks remain at 0 before black pass updates
-    c[sink_mask] .= 0.0
+                i_right = (i == N) ? 1 : i + 1
+                i_left = (i == 1) ? N : i - 1
 
-    # Black pass: i+j = odd
-    # Black pass: update cells for even rows, uneven columns (even + odd = odd)
-    @inbounds for i in 2:2:N-1
-        @inbounds @turbo for j in 3:2:N-1
-            c[i, j] = Fo * (
-                c[i+1, j] +
-                c[i-1, j] +
-                c[i, j+1] +
-                c[i, j-1]
-            ) + (1 - omega) * c[i, j]
+                c[i, j] = Fo * (
+                    c[i_right, j] +
+                    c[i_left, j] +
+                    c[i, j+1] +
+                    c[i, j-1]
+                ) + (1 - omega) * c[i, j]
+            end
         end
+        # Keep sink cells pinned between color sweeps.
+        c[sink_mask] .= 0.0
     end
-    # Black pass: update cells for uneven rows, even columns (odd + even = odd)
-    @inbounds for i in 3:2:N-1
-        @inbounds @turbo for j in 2:2:N-1
-            c[i, j] = Fo * (
-                c[i+1, j] +
-                c[i-1, j] +
-                c[i, j+1] +
-                c[i, j-1]
-            ) + (1 - omega) * c[i, j]
-        end
-    end
-    # Do boundary pass - Black cells (i+j = odd) on the boundaries
-    @inbounds @turbo for j in 2:2:N-1
-        # Left boundary
-        c[1, j] = Fo * (
-            c[2, j] +
-            c[N, j] +
-            c[1, j+1] +
-            c[1, j-1]
-        ) + (1 - omega) * c[1, j]
-    end
-    @inbounds @turbo for j in 3:2:N-1
-        # Right boundary
-        c[N, j] = Fo * (
-            c[1, j] +
-            c[N-1, j] +
-            c[N, j+1] +
-            c[N, j-1]
-        ) + (1 - omega) * c[N, j]
-    end
-
-    # Apply sink mask after both passes
-    c[sink_mask] .= 0.0
 
     return c
 end
-@deprecate c_next_SOR_sink!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool}) c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool})
 
 
 """
@@ -1275,7 +1207,7 @@ function c_next_SOR_sink_insulate!(c::Matrix{Float64}, omega::Float64; sink_mask
     do_insulate = any(insulate_mask)
 
     # Apply sink mask
-    if do_sink
+    if do_si_mg_smooth_step_cpu!nk
         c[sink_mask] .= 0.0
     end
 
@@ -1307,6 +1239,387 @@ function c_next_SOR_sink_insulate!(c::Matrix{Float64}, omega::Float64; sink_mask
     end
 
     return c
+end
+
+
+"""
+    _sink_mask_from_indices(dims, sink_indices)
+
+Build a boolean sink mask from index vectors.
+"""
+function _sink_mask_from_indices(
+    dims::Tuple{Int,Int},
+    sink_indices::Union{Nothing,AbstractVector{Int},AbstractVector{CartesianIndex{2}}},
+)::Matrix{Bool}
+    sink_mask = zeros(Bool, dims...)
+    if !isnothing(sink_indices)
+        sink_mask[sink_indices] .= true
+    end
+    return sink_mask
+end
+
+
+"""
+    _coarsen_mask(mask)
+
+Coarsen a sink mask by 2x2 blocks (OR-reduction).
+"""
+function _coarsen_mask(mask::AbstractMatrix{Bool})::Matrix{Bool}
+    ni, nj = size(mask)
+    ci = max(2, cld(ni, 2))
+    cj = max(2, cld(nj, 2))
+    coarse = zeros(Bool, ci, cj)
+
+    @inbounds for jc in 1:cj
+        j1 = 2 * jc - 1
+        j2 = min(2 * jc, nj)
+        for ic in 1:ci
+            i1 = 2 * ic - 1
+            i2 = min(2 * ic, ni)
+            coarse[ic, jc] = mask[i1, j1] || mask[i2, j1] || mask[i1, j2] || mask[i2, j2]
+        end
+    end
+
+    coarse[:, 1] .= false
+    coarse[:, end] .= false
+    return coarse
+end
+
+
+"""
+    _restrict_avg(a)
+
+Restrict a fine grid to a coarse grid by local averaging on 2x2 blocks.
+"""
+function _restrict_avg(a::Matrix{Float64})::Matrix{Float64}
+    ni, nj = size(a)
+    ci = max(2, cld(ni, 2))
+    cj = max(2, cld(nj, 2))
+    coarse = zeros(Float64, ci, cj)
+
+    @inbounds for jc in 1:cj
+        j1 = 2 * jc - 1
+        j2 = min(2 * jc, nj)
+        for ic in 1:ci
+            i1 = 2 * ic - 1
+            i2 = min(2 * ic, ni)
+            s = a[i1, j1]
+            n = 1
+            if i2 != i1
+                s += a[i2, j1]
+                n += 1
+            end
+            if j2 != j1
+                s += a[i1, j2]
+                n += 1
+                if i2 != i1
+                    s += a[i2, j2]
+                    n += 1
+                end
+            end
+            coarse[ic, jc] = s / n
+        end
+    end
+
+    return coarse
+end
+
+
+"""
+    _prolong_bilinear!(fine, coarse)
+
+Bilinearly prolong a coarse grid into `fine` in-place.
+"""
+function _prolong_bilinear!(fine::Matrix{Float64}, coarse::Matrix{Float64})
+    ni, nj = size(fine)
+    ci, cj = size(coarse)
+    inv_ni = 1.0 / max(1, ni - 1)
+    inv_nj = 1.0 / max(1, nj - 1)
+    sx = ci - 1
+    sy = cj - 1
+
+    i0v = Vector{Int}(undef, ni)
+    i1v = Vector{Int}(undef, ni)
+    txv = Vector{Float64}(undef, ni)
+    @inbounds for i in 1:ni
+        x = (i - 1) * sx * inv_ni + 1.0
+        i0 = clamp(floor(Int, x), 1, ci)
+        i1 = min(i0 + 1, ci)
+        i0v[i] = i0
+        i1v[i] = i1
+        txv[i] = x - i0
+    end
+
+    @inbounds for j in 1:nj
+        y = (j - 1) * sy * inv_nj + 1.0
+        j0 = clamp(floor(Int, y), 1, cj)
+        j1 = min(j0 + 1, cj)
+        ty = y - j0
+        for i in 1:ni
+            i0 = i0v[i]
+            i1 = i1v[i]
+            tx = txv[i]
+
+            c00 = coarse[i0, j0]
+            c10 = coarse[i1, j0]
+            c01 = coarse[i0, j1]
+            c11 = coarse[i1, j1]
+
+            fine[i, j] = (1 - tx) * (1 - ty) * c00 +
+                         tx * (1 - ty) * c10 +
+                         (1 - tx) * ty * c01 +
+                         tx * ty * c11
+        end
+    end
+
+    return nothing
+end
+
+
+"""
+    _apply_bc_and_sink!(u, sink_mask)
+
+Apply boundary and sink constraints in-place:
+- Dirichlet in y (`u[:,1]=0`, `u[:,end]=1`)
+- sink cells fixed to `0`
+- clamp concentration to non-negative values
+"""
+function _apply_bc_and_sink!(u::Matrix{Float64}, sink_mask::Matrix{Bool})
+    u[:, 1] .= 0.0
+    u[:, end] .= 1.0
+    u[sink_mask] .= 0.0
+    clamp!(u, 0.0, Inf)
+    return nothing
+end
+
+
+"""
+    _mg_smooth_step_cpu!(u, omega, sink_mask, smoother)
+
+Perform one CPU smoothing sweep used by multigrid.
+Supports `smoother = :sor` or `:rb_sor`.
+"""
+function _mg_smooth_step_cpu!(u::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool}, smoother::Symbol)
+    if smoother == :sor
+        c_next_SOR_sink!(u, omega, sink_mask)
+    elseif smoother == :rb_sor
+        c_next_SOR_sink_red_black!(u, omega, sink_mask)
+    else
+        throw(ArgumentError("Unknown smoother '$smoother'. Use :sor or :rb_sor."))
+    end
+    return nothing
+end
+
+
+"""
+    _mg_smooth_step_gpu!(u, omega, sink_mask, backend, c_dev, sink_dev)
+
+Perform one GPU smoothing sweep on the finest multigrid level.
+The fine-grid field `u` is transferred to device, smoothed with backend-specific
+RB-SOR (`:metal` or `:cuda`), copied back to CPU, and sink cells are re-applied.
+"""
+function _mg_smooth_step_gpu!(
+    u::Matrix{Float64},
+    omega::Float64,
+    sink_mask::Matrix{Bool},
+    backend::Symbol,
+    c_dev,
+    sink_dev,
+)
+    if backend == :metal
+        copyto!(c_dev, Matrix{Float32}(u))
+        c_next_SOR_sink_metal!(c_dev, Float32(omega), sink_dev)
+        copyto!(u, Float64.(Array(c_dev)))
+    elseif backend == :cuda
+        copyto!(c_dev, Matrix{Float32}(u))
+        c_next_SOR_sink_cuda!(c_dev, Float32(omega), sink_dev)
+        copyto!(u, Float64.(Array(c_dev)))
+    else
+        throw(ArgumentError("Unknown backend '$backend' for GPU smoother."))
+    end
+    u[sink_mask] .= 0.0
+    return nothing
+end
+
+
+"""
+    _max_laplace_residual(u, sink_mask)
+
+Compute the infinity norm of the discrete Laplace residual on interior non-sink
+cells, using periodic wrapping in x and interior points in y.
+"""
+function _max_laplace_residual(u::Matrix{Float64}, sink_mask::Matrix{Bool})::Float64
+    ni, nj = size(u)
+    max_res = 0.0
+    @inbounds for i in 1:ni
+        ip = (i == ni) ? 1 : i + 1
+        im = (i == 1) ? ni : i - 1
+        for j in 2:nj-1
+            if sink_mask[i, j]
+                continue
+            end
+            r = abs((u[ip, j] + u[im, j] + u[i, j+1] + u[i, j-1]) - 4.0 * u[i, j])
+            if r > max_res
+                max_res = r
+            end
+        end
+    end
+    return max_res
+end
+
+
+"""
+    _laplace_mg_vcycle!(u, sink_mask, level, max_level, omega, smoother, pre_sweeps, post_sweeps, coarse_sweeps, backend, c_dev, sink_dev)
+
+Run one recursive multigrid V-cycle for the Laplace problem with sinks.
+Pre/post smoothing is backend-aware only at the finest level (`level == 1`);
+coarser levels use CPU smoothing.
+"""
+function _laplace_mg_vcycle!(
+    u::Matrix{Float64},
+    sink_mask::Matrix{Bool},
+    level::Int,
+    max_level::Int,
+    omega::Float64,
+    smoother::Symbol,
+    pre_sweeps::Int,
+    post_sweeps::Int,
+    coarse_sweeps::Int,
+    backend::Symbol,
+    c_dev,
+    sink_dev,
+)
+    # Coarsest level: smooth only on CPU
+    if level >= max_level || min(size(u)...) <= 5
+        for _ in 1:coarse_sweeps
+            _mg_smooth_step_cpu!(u, omega, sink_mask, smoother)
+        end
+        _apply_bc_and_sink!(u, sink_mask)
+        return nothing
+    end
+
+    # Pre-smoothing: backend acceleration only on finest level
+    for _ in 1:pre_sweeps
+        if level == 1 && backend != :cpu
+            _mg_smooth_step_gpu!(u, omega, sink_mask, backend, c_dev, sink_dev)
+        else
+            _mg_smooth_step_cpu!(u, omega, sink_mask, smoother)
+        end
+    end
+
+    # Coarse correction (same scheme as archive implementation)
+    u_coarse = _restrict_avg(u)
+    sink_mask_coarse = _coarsen_mask(sink_mask)
+    _laplace_mg_vcycle!(
+        u_coarse,
+        sink_mask_coarse,
+        level + 1,
+        max_level,
+        omega,
+        smoother,
+        pre_sweeps,
+        post_sweeps,
+        coarse_sweeps,
+        :cpu,
+        nothing,
+        nothing,
+    )
+
+    _prolong_bilinear!(u, u_coarse)
+    _apply_bc_and_sink!(u, sink_mask)
+
+    for _ in 1:post_sweeps
+        if level == 1 && backend != :cpu
+            _mg_smooth_step_gpu!(u, omega, sink_mask, backend, c_dev, sink_dev)
+        else
+            _mg_smooth_step_cpu!(u, omega, sink_mask, smoother)
+        end
+    end
+    _apply_bc_and_sink!(u, sink_mask)
+
+    return nothing
+end
+
+
+"""
+    laplace_multigrid!(c; sink_indices=nothing, omega=1.6, smoother=:sor, ncycles=8, levels=0, pre_sweeps=2, post_sweeps=2, coarse_sweeps=30, tol=1e-6, backend=:cpu)
+
+Run a multigrid V-cycle solver for Laplace's equation with sink constraints.
+Returns the maximum Laplace residual after the final cycle.
+"""
+function laplace_multigrid!(
+    c::Matrix{Float64};
+    sink_indices::Union{Nothing,AbstractVector{Int},AbstractVector{CartesianIndex{2}}}=nothing,
+    omega::Float64=1.6,
+    smoother::Symbol=:sor,
+    ncycles::Int=8,
+    levels::Int=0,
+    pre_sweeps::Int=2,
+    post_sweeps::Int=2,
+    coarse_sweeps::Int=30,
+    tol::Float64=1e-6,
+    backend::Symbol=:cpu,
+)::Float64
+    if ncycles < 1
+        throw(ArgumentError("ncycles must be >= 1"))
+    end
+    if backend ∉ (:cpu, :metal, :cuda)
+        throw(ArgumentError("backend must be one of :cpu, :metal, :cuda"))
+    end
+
+    if backend != :cpu && smoother != :rb_sor
+        @info "Overriding multigrid smoother to :rb_sor for backend=$backend (GPU smoothing supports RB only)."
+        smoother = :rb_sor
+    end
+    if backend == :cuda && !CUDA.functional()
+        error("backend=:cuda requested, but CUDA is not functional in this environment.")
+    end
+
+    ni, nj = size(c)
+    max_levels_auto = 1
+    while min(ni, nj) >= 9
+        ni = cld(ni, 2)
+        nj = cld(nj, 2)
+        max_levels_auto += 1
+    end
+    nlevels = levels > 0 ? min(levels, max_levels_auto) : max_levels_auto
+
+    sink_mask = _sink_mask_from_indices(size(c), sink_indices)
+    _apply_bc_and_sink!(c, sink_mask)
+
+    c_dev = nothing
+    sink_dev = nothing
+    if backend == :metal
+        c_dev = MtlMatrix(Matrix{Float32}(c))
+        sink_dev = MtlMatrix(sink_mask)
+    elseif backend == :cuda
+        c_dev = CuArray(Matrix{Float32}(c))
+        sink_dev = CuArray(sink_mask)
+    end
+
+    max_res = Inf
+    for _ in 1:ncycles
+        _laplace_mg_vcycle!(
+            c,
+            sink_mask,
+            1,
+            nlevels,
+            omega,
+            smoother,
+            pre_sweeps,
+            post_sweeps,
+            coarse_sweeps,
+            backend,
+            c_dev,
+            sink_dev,
+        )
+        max_res = _max_laplace_residual(c, sink_mask)
+        if max_res < tol
+            break
+        end
+    end
+
+    return max_res
 end
 
 end # module

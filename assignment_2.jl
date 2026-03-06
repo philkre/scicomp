@@ -1,3 +1,7 @@
+import Pkg
+Pkg.activate(@__DIR__)
+Pkg.instantiate()
+
 using ArgParse
 using Distributed: @everywhere
 
@@ -33,6 +37,8 @@ Parse command-line arguments for controlling assignment execution.
 - `--bench`, `-b`: Execute benchmarking
 - `--gif`, `-g`: Create GIFs
 - `--cache`, `-c`: Use caching
+- `--backend`: Backend for Assignment 2.1 (`auto`, `cpu`, `metal`, `cuda`)
+- `--solver`: Solver for Assignment 2.x (`sor`, `rb_sor`, `multigrid`)
 - `-p`: Output directory for plots (default: "plots/ass_2/")
 - `--ass1`: Execute only Assignment 2.1
 - `--ass2`: Execute only Assignment 2.2
@@ -60,6 +66,16 @@ function parse_commandline()::Dict{String,Any}
         "--gpu"
         help = "use GPU for computation. WARNING: This feature currently only supports Metal.jl on macOS."
         action = :store_true
+
+        "--backend"
+        help = "backend for Assignment 2.1 (`auto`, `cpu`, `metal`, `cuda`). `auto` keeps legacy behavior via --gpu."
+        arg_type = String
+        default = "auto"
+
+        "--solver"
+        help = "solver for Assignment 2.x (`sor`, `rb_sor`, `multigrid`)."
+        arg_type = String
+        default = "rb_sor"
 
         "--nprocs"
         help = "number of processes for distributed computing"
@@ -98,6 +114,23 @@ if ((abspath(PROGRAM_FILE) == @__FILE__) || !isempty(PROGRAM_FILE)) && !isintera
     do_gif = args["gif"]
     do_cache = args["cache"]
     use_GPU = args["gpu"]
+    backend_arg = lowercase(args["backend"])
+    if backend_arg ∉ ("auto", "cpu", "metal", "cuda")
+        error("Invalid --backend value '$backend_arg'. Valid options are: auto, cpu, metal, cuda.")
+    end
+    backend_ass2_1::Symbol = Symbol(backend_arg == "auto" ? (use_GPU ? "metal" : "cpu") : backend_arg)
+    use_GPU_runtime::Bool = backend_ass2_1 == :metal
+    if backend_ass2_1 == :cuda
+        @info "backend=:cuda selected. Assignment 2.x will use CUDA-backed solvers where available."
+    end
+    if backend_arg != "auto" && use_GPU
+        @info "--backend overrides --gpu for Assignment 2.1 selection."
+    end
+    solver_arg = lowercase(args["solver"])
+    if solver_arg ∉ ("sor", "rb_sor", "multigrid")
+        error("Invalid --solver value '$solver_arg'. Valid options are: sor, rb_sor, multigrid.")
+    end
+    solver_ass2::Symbol = Symbol(solver_arg)
     nprocs = args["nprocs"]
     plot_output_dir = args["p"]
 
@@ -127,7 +160,15 @@ if ((abspath(PROGRAM_FILE) == @__FILE__) || !isempty(PROGRAM_FILE)) && !isintera
             @everywhere include("src/ass_2/assignment_2_1.jl")
             @everywhere using .Assignment_2_1: main as main_2_1
         end
-        @time "Assignment 2.1 completed" main_2_1(; do_bench=do_bench, do_gif=do_gif, do_cache=do_cache, use_GPU=use_GPU, plot_output_dir=plot_output_dir)
+        @time "Assignment 2.1 completed" main_2_1(;
+            do_bench=do_bench,
+            do_gif=do_gif,
+            do_cache=do_cache,
+            use_GPU=use_GPU_runtime,
+            backend=backend_ass2_1,
+            solver=solver_ass2,
+            plot_output_dir=plot_output_dir,
+        )
     end
 
     # Assignment 2.2
@@ -137,7 +178,7 @@ if ((abspath(PROGRAM_FILE) == @__FILE__) || !isempty(PROGRAM_FILE)) && !isintera
             @everywhere include("src/ass_2/assignment_2_2.jl")
             @everywhere using .Assignment_2_2: main as main_2_2
         end
-        @time "Assignment 2.2 completed" main_2_2(; do_bench=do_bench, do_gif=do_gif, do_cache=do_cache, use_GPU=use_GPU, plot_output_dir=plot_output_dir)
+        @time "Assignment 2.2 completed" main_2_2(; do_bench=do_bench, do_gif=do_gif, do_cache=do_cache, use_GPU=use_GPU_runtime, backend=backend_ass2_1, solver=solver_ass2, plot_output_dir=plot_output_dir)
     end
 
     # Assignment 2.3

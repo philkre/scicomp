@@ -14,11 +14,8 @@ include("plot.jl")
 using .Sim: run_diffusion, run_wave, run_wave_1b, run_steadystate, optimise_omega, sink_builder
 using .Plotting: plot_animation, plot_profiles, plot_2d_concentration, plot_wave_final, animate_wave_all, plot_steadystate, plot_concentration_profiles_steady, plot_convergence_its, plot_omega_optimisation, plot_omega_sweep_panels, plot_wave_multi_t, plot_euler_leapfrog_energy
 
-"""
-    main_wave()
 
-Run the wave-equation workflow and generate the configured plots/animations.
-"""
+
 function main_wave()
     L = 1.0
     N = 100
@@ -68,11 +65,6 @@ function main_wave()
     return nothing
 end
 
-"""
-    main_diffusion()
-
-Configure and run the diffusion workflow plus optional plotting calls.
-"""
 function main_diffusion()
     D = 1.0
     Lx = 1.0
@@ -99,11 +91,8 @@ function main_diffusion()
     # plot_2d_concentration(output_data_path, "output/img/concentration.png", [0.0, 0.001, 0.01, 0.1, 1.0])
 end
 
-"""
-    main_steadystate()
 
-Run steady-state experiments (methods, omega sweeps, and optional sink studies).
-"""
+
 function main_steadystate()
 
     N = 100
@@ -238,11 +227,6 @@ function main_steadystate()
     end
 end
 
-"""
-    main()
-
-Default project entrypoint.
-"""
 function main()
     #main_steadystate()
     main_wave()
