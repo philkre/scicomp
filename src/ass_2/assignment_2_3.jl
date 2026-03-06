@@ -143,10 +143,7 @@ function main(; do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, 
     concentration_arr_1 = [mean(v) for v in v_hist]
     concentration_arr_2 = [mean(v) for v in v_hist2]
     concentration_arr_3 = [mean(v) for v in v_hist3]
-    time = [i for i in 1:length(concentration_arr_1)]
-    println(length(concentration_arr_1))
-    println(length(concentration_arr_2))
-    println(length(concentration_arr_3))
+    time = [i*10 for i in 1:length(concentration_arr_1)]
 
     plot!(time, concentration_arr_1, label= @sprintf("(f=%.4f, k=%.4f)", f, k))
     plot!(time, concentration_arr_2, label= @sprintf("(f=%.4f, k=%.4f)", f2, k2))
