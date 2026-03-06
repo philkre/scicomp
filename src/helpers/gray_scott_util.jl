@@ -54,7 +54,7 @@ function plot_gray_scott_state(
         p1, p2,
         layout=(1, 2),
         size=(1200, 500),
-        plot_title="$title_prefix (f=$(@sprintf("%.4f", 0.035)), k=$(@sprintf("%.4f", 0.060)))"
+        plot_title="$title_prefix"
     )
 end
 

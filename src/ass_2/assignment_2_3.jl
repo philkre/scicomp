@@ -3,6 +3,8 @@ module Assignment_2_3
 # Import local module
 include("../helpers/__init__.jl")
 
+using Printf: @sprintf
+
 # Gray-Scott helpers
 using .Helpers.GrayScottCore: simulate_gray_scott
 
@@ -28,7 +30,7 @@ function main(; do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, 
     u_init = 0.5
     v_center = 0.25
     center_size = 10
-    noise_level = 0.01
+    noise_level = 0.1
 
     # Run simulation
     @info ("Running scenario 1: Standard parameters (spots pattern)")
@@ -52,14 +54,14 @@ function main(; do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, 
         )
     end
     # Plot final state
-    filename_final_state = joinpath(plot_output_dir, "gray_scott_final_spots.png")
-    p_final = plot_gray_scott_state(u_hist[end], v_hist[end], t_hist[end]; L=L)
+    filename_final_state = joinpath(plot_output_dir, "gray_scott_final_spots.png" )
+    p_final = plot_gray_scott_state(u_hist[end], v_hist[end], t_hist[end]; L=L, title_prefix="Gray-Scott (Stripes) (f=$(@sprintf("%.4f", f)), k=$(@sprintf("%.4f", k)))")
     savefig_auto_folder(p_final, filename_final_state)
     @info "Final state (spots pattern) saved to: $(filename_final_state)"
     # Optionally create GIF animation of the simulation
     if do_gif
         filename_gif = joinpath(plot_output_dir, "gray_scott_spots.gif")
-        plots = [plot_gray_scott_state(u_hist[i], v_hist[i], t_hist[i]; L=L) for i in eachindex(t_hist)]
+        plots = [plot_gray_scott_state(u_hist[i], v_hist[i], t_hist[i]; L=L, title_prefix="Gray-Scott (Stripes) (f=$(@sprintf("%.4f", f)), k=$(@sprintf("%.4f", k)))") for i in eachindex(t_hist)]
         distributed_gif(plots, filename_gif; fps=60, do_palette=true, width=1200)
         @info "Animation saved to: $filename_gif"
     end
@@ -89,13 +91,13 @@ function main(; do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, 
     end
     # Plot final state for stripes pattern
     filename_final_state_stripes = joinpath(plot_output_dir, "gray_scott_final_stripes.png")
-    p_stripes = plot_gray_scott_state(u_hist2[end], v_hist2[end], t_hist2[end]; title_prefix="Gray-Scott (Stripes)")
+    p_stripes = plot_gray_scott_state(u_hist2[end], v_hist2[end], t_hist2[end]; title_prefix="Gray-Scott (Stripes) (f=$(@sprintf("%.4f", f2)), k=$(@sprintf("%.4f", k2)))")
     savefig_auto_folder(p_stripes, filename_final_state_stripes)
     @info "Final state (stripes pattern) saved to: $(filename_final_state_stripes)"
     # Optionally create GIF animation of the simulation
     if do_gif
         filename_gif_stripes = joinpath(plot_output_dir, "gray_scott_stripes.gif")
-        plots_stripes = [plot_gray_scott_state(u_hist2[i], v_hist2[i], t_hist2[i]; title_prefix="Gray-Scott (Stripes)", L=L) for i in eachindex(t_hist2)]
+        plots_stripes = [plot_gray_scott_state(u_hist2[i], v_hist2[i], t_hist2[i]; title_prefix="Gray-Scott (Stripes) (f=$(@sprintf("%.4f", f2)), k=$(@sprintf("%.4f", k2)))", L=L) for i in eachindex(t_hist2)]
         distributed_gif(plots_stripes, filename_gif_stripes; fps=60, do_palette=true, width=1200)
         @info "Animation saved to: $filename_gif_stripes"
     end
@@ -122,13 +124,13 @@ function main(; do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, 
     end
     # Plot final state for flatten pattern
     filename_final_state_flatten = joinpath(plot_output_dir, "gray_scott_final_flatten.png")
-    p_flatten = plot_gray_scott_state(u_hist3[end], v_hist3[end], t_hist3[end]; title_prefix="Gray-Scott (flatten)")
+    p_flatten = plot_gray_scott_state(u_hist3[end], v_hist3[end], t_hist3[end]; title_prefix="Gray-Scott (flatten) (f=$(@sprintf("%.4f", f3)), k=$(@sprintf("%.4f", k3)))")
     savefig_auto_folder(p_flatten, filename_final_state_flatten)
     @info "Final state (flatten pattern) saved to: $(filename_final_state_flatten)"
     # Optionally create GIF animation of the simulation
     if do_gif
         filename_gif_flatten = joinpath(plot_output_dir, "gray_scott_flatten.gif")
-        plots_flatten = [plot_gray_scott_state(u_hist3[i], v_hist3[i], t_hist3[i]; title_prefix="Gray-Scott (flatten)", L=L) for i in eachindex(t_hist3)]
+        plots_flatten = [plot_gray_scott_state(u_hist3[i], v_hist3[i], t_hist3[i]; title_prefix="Gray-Scott (flatten) (f=$(@sprintf("%.4f", f3)), k=$(@sprintf("%.4f", k3)))", L=L) for i in eachindex(t_hist3)]
         distributed_gif(plots_flatten, filename_gif_flatten; fps=60, do_palette=true, width=1200)
         @info "Animation saved to: $filename_gif_flatten"
     end
