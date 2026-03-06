@@ -4,6 +4,8 @@ module Assignment_2_3
 include("../helpers/__init__.jl")
 
 using Printf: @sprintf
+using Plots
+using Statistics
 
 # Gray-Scott helpers
 using .Helpers.GrayScottCore: simulate_gray_scott
@@ -24,7 +26,7 @@ function main(; do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, 
     Dv = 0.08       # Diffusion coefficient for V  
     f = 0.03       # Feed rate
     k = 0.055       # Kill rate
-    T = 10000.0     # Total simulation time
+    T = 6000.0     # Total simulation time
 
     # Initial conditions
     u_init = 0.5
@@ -73,7 +75,7 @@ function main(; do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, 
     @time "Ran simulation 2" begin
         u_hist2, v_hist2, t_hist2 = simulate_gray_scott(
             N,
-            5000.0,
+            T,
             dt,
             dx;
             Du=Du,
@@ -108,7 +110,7 @@ function main(; do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, 
     @time "Ran simulation 3" begin
         u_hist3, v_hist3, t_hist3 = simulate_gray_scott(
             N,
-            5000.0,
+            T,
             dt,
             dx;
             Du=Du,
@@ -119,7 +121,7 @@ function main(; do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, 
             v_center=v_center,
             center_size=center_size,
             noise_level=noise_level,
-            save_every=50
+            save_every=10
         )
     end
     # Plot final state for flatten pattern
@@ -134,6 +136,23 @@ function main(; do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, 
         distributed_gif(plots_flatten, filename_gif_flatten; fps=60, do_palette=true, width=1200)
         @info "Animation saved to: $filename_gif_flatten"
     end
+
+    #Plot concentration plot
+    filename_concentration = joinpath(plot_output_dir, "gray_scott_conc.png")
+    concentration_plot = plot()
+    concentration_arr_1 = [mean(v) for v in v_hist]
+    concentration_arr_2 = [mean(v) for v in v_hist2]
+    concentration_arr_3 = [mean(v) for v in v_hist3]
+    time = [i for i in 1:length(concentration_arr_1)]
+    println(length(concentration_arr_1))
+    println(length(concentration_arr_2))
+    println(length(concentration_arr_3))
+
+    plot!(time, concentration_arr_1, label= @sprintf("(f=%.4f, k=%.4f)", f, k))
+    plot!(time, concentration_arr_2, label= @sprintf("(f=%.4f, k=%.4f)", f2, k2))
+    plot!(time, concentration_arr_3, label= @sprintf("(f=%.4f, k=%.4f)", f3, k3))
+    savefig_auto_folder(concentration_plot, filename_concentration)
+
 
     return
 end
