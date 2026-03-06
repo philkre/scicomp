@@ -1,34 +1,24 @@
 module Sim
 
 using ProgressMeter
+using TimerOutputs
 
-import ..Model: diffusion2d!, euler_step!, leapfrog_step!, laplace_jacobi!, laplace_gauss_seidel!, laplace_sor!
+import ..Model: diffusion2d!, euler_step!, leapfrog_step!, laplace_jacobi!, laplace_gauss_seidel!, laplace_sor!, laplace_multigrid!, update_mask!
 import ..DataIO: write_out!
 
-export run_wave, run_wave_1b, run_diffusion, run_steadystate, optimise_omega, sink_builder
+export run_wave, run_wave_1b, run_diffusion, run_steadystate, run_dla, optimise_omega, sink_builder
 
-function _wave_total_energy(
-    psi::AbstractVector{<:Real},
-    v::AbstractVector{<:Real},
-    c::Real,
-    dx::Real,
-)::Float64
-    strain = diff(psi) ./ dx
-    kinetic = 0.5 * dx * sum(abs2, v)
-    potential = 0.5 * c^2 * dx * sum(abs2, strain)
-    return kinetic + potential
-end
+"""
+    sink_builder(N; fraction=0.2, shape=:square)
 
+Construct centered sink indices on an `N x N` grid, limited to interior cells.
+Supported shapes are `:square`, `:circle`, and `:triangle`.
+"""
 function sink_builder(
     N::Int;
     fraction::Float64=0.2,
     shape::Symbol=:square,
 )::Vector{CartesianIndex{2}}
-    """
-    Builds a centered sink on an N x N grid, restricted to interior points.
-    Supported shapes: :square (default), :circle, :triangle.
-    The sink extent is scaled by `fraction` of the interior size.
-    """
     @assert N >= 3 "sink_builder requires N >= 3, got $N"
     @assert 0.0 < fraction <= 1.0 "sink_builder requires 0 < fraction <= 1, got $fraction"
     if !(shape in (:square, :circle, :triangle))
@@ -76,6 +66,12 @@ function sink_builder(
     return sink_idxs
 end
 
+"""
+    run_wave(psi0, c, dx, dt, n_steps; method="euler", timing=false)
+
+Simulate a 1D wave for one initial condition and return an `(n, n_steps)` matrix
+of wave profiles over time.
+"""
 function run_wave(
     psi0::AbstractVector{<:Real},
     c::Real,
@@ -86,9 +82,6 @@ function run_wave(
     track_energy::Bool=false,
     timing::Bool=false,
 )
-    """
-    Runs the wave simulation for one initial condition.
-    """
     psi = collect(Float64, psi0)
     n = length(psi)
     v = zeros(n)
@@ -122,18 +115,13 @@ function run_wave(
     return psis
 end
 
-function run_wave_1b(
-    c::Real,
-    dx::Real,
-    dt::Real,
-    n_steps::Integer,
-    L::Real;
-    method::String="euler",
-    track_energy::Bool=false,
-)
-    """
-    Runs the 1D wave simulation for the three assignment initial conditions.
-    """
+"""
+    run_wave_1b(c, dx, dt, n_steps, L; method="euler")
+
+Run the 1D wave simulation for the three assignment initial conditions and
+return a vector with three trajectory matrices.
+"""
+function run_wave_1b(c::Real, dx::Real, dt::Real, n_steps::Integer, L::Real; method::String="euler")
     x = 0:dx:L
     psi_i = [sin(2 * pi * xi) for xi in x]
     psi_ii = [sin(5 * pi * xi) for xi in x]
@@ -152,6 +140,11 @@ function run_wave_1b(
     return [run_i, run_ii, run_iii]
 end
 
+"""
+    run_diffusion(D, N, dy, dx, dt, steps, write_interval; timing=false, progress=false, filepath="output/data/output.h5")
+
+Run an explicit 2D diffusion simulation and periodically write snapshots to HDF5.
+"""
 function run_diffusion(
     D::Float64,
     N::Int,
@@ -164,9 +157,6 @@ function run_diffusion(
     progress::Bool=false,
     filepath::String="output/data/output.h5",
 )
-    """
-    Runs the diffusion simulation for a given parameter set.
-    """
     stab = 4 * dt * D / (dx * dx)
     @assert stab <= 1 "Stability condition violated: 4*D*dt/dx^2 must be <= 1, is $stab"
 
@@ -200,27 +190,92 @@ function run_diffusion(
     return nothing
 end
 
+"""
+    run_dla(N, max_cycles, nu, omega; epsilon=1e-6, growth_steps=100, timed=false, solver=:rb_sor)
+
+Run the DLA-coupled Laplace simulation on an `N x N` grid.
+Each growth step solves concentration with multigrid and then performs one
+stochastic growth event via `update_mask!`. Returns snapshots of concentration
+and occupancy mask; optionally returns timing breakdown when `timed=true`.
+"""
+function run_dla(
+    N::Int,
+    max_cycles::Int,
+    nu::Float64,
+    omega::Float64;
+    epsilon::Float64=1e-6,
+    growth_steps::Int=100,
+    timed::Bool=false,
+    solver::Symbol=:rb_sor,
+)
+    c = zeros(N, N)
+    c[:, 1] .= 0.0
+    c[:, end] .= 1.0
+
+    m = ones(N, N)
+    init_pos = [floor(Int, N / 2), 1]
+    m[init_pos...] = 0.0
+
+    cs = Matrix{Float64}[]
+    masks = Matrix{Float64}[]
+    to = TimerOutput()
+
+    for growth_step in 1:growth_steps
+        if any(m[:, end] .== 0.0)
+            println("Sink reached top row at growth step $growth_step, stopping simulation.")
+            break
+        end
+
+        sink_indices = @timeit to "findall sink_indices" findall(m .== 0.0)
+
+        @timeit to "laplace_multigrid! cycles" begin
+            laplace_multigrid!(
+                c;
+                sink_indices=sink_indices,
+                omega=omega,
+                ncycles=max_cycles,
+                tol=epsilon,
+                smoother=solver,
+            )
+        end
+
+        @timeit to "store frames" begin
+            push!(cs, copy(c))
+            push!(masks, copy(m))
+        end
+
+        @timeit to "update_mask!" update_mask!(c, m, nu)
+    end
+
+    results = Dict("cs" => cs, "masks" => masks)
+    return timed ? (results, to) : results
+end
+
+"""
+    run_steadystate(c, epsilon; method="jacobi", omega=nothing, sink_indices=nothing, max_iters=1_000_000)
+
+Iterate a 2D Laplace solver until `maximum(abs.(c - c_prev)) < epsilon` or
+`max_iters` is reached. Returns `(c, iterations, deltas)`.
+"""
 function run_steadystate(
     c::Matrix{Float64},
     epsilon::Float64;
     method::String="jacobi",
     omega::Union{Nothing,Float64}=nothing,
     sink_indices::Union{Nothing,AbstractVector{Int},AbstractVector{CartesianIndex{2}}}=nothing,
+    mg_cycles_per_iter::Int=1,
+    mg_smoother::Symbol=:sor,
     max_iters::Int=1_000_000,
 )::Tuple{Matrix{Float64},Int64,Vector{Float64}}
-    """
-    Runs steady-state iterations until convergence to epsilon step difference.
-    """
-    if !(method in ("jacobi", "gauss-seidel", "sor"))
-        error("Unknown method '$method'. Use 'jacobi', 'gauss-seidel', or 'sor'.")
+    if !(method in ("jacobi", "gauss-seidel", "sor", "multigrid"))
+        error("Unknown method '$method'. Use 'jacobi', 'gauss-seidel', 'sor', or 'multigrid'.")
     end
 
-    omega_eff = method == "sor" ? (isnothing(omega) ? 1.8 : omega) : 1.0
-    if method == "sor"
+    omega_eff = (method == "sor" || method == "multigrid") ? (isnothing(omega) ? 1.8 : omega) : 1.0
+    if method == "sor" || method == "multigrid"
         @assert 0.0 < omega_eff < 2.0 "SOR requires 0 < omega < 2, got $omega_eff"
     end
 
-    # Convert sink indices once to linear Int indices for faster repeated writes.
     sink_linear::Union{Nothing,Vector{Int}} = if isnothing(sink_indices)
         nothing
     elseif sink_indices isa AbstractVector{Int}
@@ -230,13 +285,21 @@ function run_steadystate(
         [lin[idx] for idx in sink_indices]
     end
 
-    # Resolve method-specific iteration once (outside convergence loop).
     iter_step! = if method == "jacobi"
         c_local -> laplace_jacobi!(c_local; sink_indices=sink_linear)
     elseif method == "gauss-seidel"
         c_local -> laplace_gauss_seidel!(c_local; sink_indices=sink_linear)
-    else
+    elseif method == "sor"
         c_local -> laplace_sor!(c_local, omega_eff; sink_indices=sink_linear)
+    else
+        c_local -> laplace_multigrid!(
+            c_local;
+            sink_indices=sink_linear,
+            omega=omega_eff,
+            smoother=mg_smoother,
+            ncycles=mg_cycles_per_iter,
+            tol=0.0,
+        )
     end
 
     deltas = Float64[]
@@ -258,6 +321,12 @@ function run_steadystate(
     return c, its, deltas
 end
 
+"""
+    optimise_omega(epsilon, omegas, Ns; max_iters=200_000, omega_band=0.12, omega_min=1.0, omega_max=1.98, sink_indices=nothing)
+
+Evaluate SOR iteration counts over an `(omega, N)` sweep near the theoretical
+optimal relaxation factor and return `(iterations, converged, computed)` masks.
+"""
 function optimise_omega(
     epsilon::Float64,
     omegas::AbstractVector{Float64},
@@ -273,13 +342,6 @@ function optimise_omega(
         Function,
     }=nothing,
 )::Tuple{Matrix{Int64},BitMatrix,BitMatrix}
-    """
-    Finds optimal omega for SOR over a well-behaved (omega, N) region.
-    Region per N is centered around:
-    omega*(N) = 2 / (1 + sin(pi/(N-1)))
-    and restricted to [omega*(N)-omega_band, omega*(N)+omega_band],
-    additionally clipped to [omega_min, omega_max].
-    """
     its_vec = Matrix{Int64}(undef, length(omegas), length(Ns))
     converged = falses(length(omegas), length(Ns))
     computed = falses(length(omegas), length(Ns))
@@ -322,6 +384,14 @@ function optimise_omega(
             c_local = zeros(N, N)
             c_local[:, 1] .= 0
             c_local[:, end] .= 1
+            _, its, _ = run_steadystate(
+                c_local,
+                epsilon;
+                method="sor",
+                omega=omega,
+                sink_indices=sink_for_N,
+                max_iters=max_iters,
+            )
             _, its, _ = run_steadystate(
                 c_local,
                 epsilon;
