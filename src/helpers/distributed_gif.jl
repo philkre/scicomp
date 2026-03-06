@@ -118,7 +118,7 @@ Create an animated GIF from a vector of plots using distributed computing and FF
 - With `do_palette=true`, generates an optimized palette for better color reproduction
 - Uses OpenCL hardware acceleration on macOS when available
 """
-function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifpath::String; fps::Int64=30, do_palette=false, width::Int=nothing, use_ffmpeg::Bool=true, verbose::Bool=false, hwaccel::String="OpenCL")
+function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifpath::String; fps::Int64=30, do_palette=false, width::Int=nothing, use_ffmpeg::Bool=true, verbose::Bool=false, hwaccel::String="OpenCL", mp4 = false)
     # Parse arguments
     verbose_level = (verbose ? 32 : 16) # "error"
     width = isnothing(width) ? plots[1].attr[:size][1] : width  # Default to width of first plot if not specified
@@ -168,8 +168,12 @@ function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifpath::St
             end
         end
     else
-        # Use native gif-function
-        gif(anim, gifpath, fps=fps)
+        # Use native gif or mp4-function
+        if mp4
+            mp4(anim, gifpath, fps=fps)
+        else
+            gif(anim, gifpath, fps=fps)
+        end
     end
 
     # Clean up temporary files
