@@ -57,13 +57,13 @@ function main(; do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, 
     end
     # Plot final state
     filename_final_state = joinpath(plot_output_dir, "gray_scott_final_spots.png" )
-    p_final = plot_gray_scott_state(u_hist[end], v_hist[end], t_hist[end]; L=L, title_prefix="Gray-Scott (Stripes) (f=$(@sprintf("%.4f", f)), k=$(@sprintf("%.4f", k)))")
+    p_final = plot_gray_scott_state(u_hist[end], v_hist[end], t_hist[end]; L=L, title_prefix="Gray-Scott (spots) (f=$(@sprintf("%.4f", f)), k=$(@sprintf("%.4f", k)))")
     savefig_auto_folder(p_final, filename_final_state)
     @info "Final state (spots pattern) saved to: $(filename_final_state)"
     # Optionally create GIF animation of the simulation
     if do_gif
         filename_gif = joinpath(plot_output_dir, "gray_scott_spots.gif")
-        plots = [plot_gray_scott_state(u_hist[i], v_hist[i], t_hist[i]; L=L, title_prefix="Gray-Scott (Stripes) (f=$(@sprintf("%.4f", f)), k=$(@sprintf("%.4f", k)))") for i in eachindex(t_hist)]
+        plots = [plot_gray_scott_state(u_hist[i], v_hist[i], t_hist[i]; L=L, title_prefix="Gray-Scott (spots) (f=$(@sprintf("%.4f", f)), k=$(@sprintf("%.4f", k)))") for i in eachindex(t_hist)]
         distributed_gif(plots, filename_gif; fps=60, do_palette=true, width=1200)
         @info "Animation saved to: $filename_gif"
     end
