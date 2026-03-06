@@ -23,8 +23,8 @@ plot_output_dir = "plots/ass_2/"
 
 
 # Do assignments (default behavior)
-do_ass_1 = false
-do_ass_2 = false
+do_ass_1 = true
+do_ass_2 = true
 do_ass_3 = true
 
 
