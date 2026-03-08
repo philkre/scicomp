@@ -1,4 +1,0 @@
-N,backend,solver,mean_time_s,std_time_s,n_repeats
-10,cpu,multigrid,8.6417e-5,NaN,1
-10,cpu,rb_sor,5.8541e-5,NaN,1
-10,cpu,sor,5.95e-5,NaN,1
