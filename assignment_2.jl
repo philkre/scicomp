@@ -47,6 +47,10 @@ Parse command-line arguments for controlling assignment execution.
 - `--rerender-eta-dimension-plot`: Rebuild the eta sweep figure from existing CSV summaries
 - `--eta-min`, `--eta-max`, `--eta-step`: Eta-range controls for the fractal-dimension sweep
 - `--eta-repeats`: Repeats per eta value for the fractal-dimension sweep
+- `--ps-dimension-sweep`: Run the stickiness sweep / fractal-dimension analysis for Assignment 2.2
+- `--rerender-ps-dimension-plot`: Rebuild the p_s sweep figure from existing CSV summaries
+- `--ps-min`, `--ps-max`, `--ps-step`: p_s-range controls for the Monte Carlo fractal-dimension sweep
+- `--ps-repeats`: Repeats per p_s value for the Monte Carlo fractal-dimension sweep
 - `-p`: Output directory for plots (default: "plots/ass_2/")
 - `--ass1`: Execute only Assignment 2.1
 - `--ass2`: Execute only Assignment 2.2
@@ -142,6 +146,34 @@ function parse_commandline()::Dict{String,Any}
         arg_type = Int
         default = 30
 
+        "--ps-dimension-sweep"
+        help = "run p_s sweep / fractal-dimension analysis (Assignment 2.2)"
+        action = :store_true
+
+        "--rerender-ps-dimension-plot"
+        help = "rebuild the p_s sweep figure from existing CSV summaries (Assignment 2.2)"
+        action = :store_true
+
+        "--ps-min"
+        help = "minimum p_s for Monte Carlo fractal-dimension sweep"
+        arg_type = Float64
+        default = 0.1
+
+        "--ps-max"
+        help = "maximum p_s for Monte Carlo fractal-dimension sweep"
+        arg_type = Float64
+        default = 1.0
+
+        "--ps-step"
+        help = "p_s step for Monte Carlo fractal-dimension sweep"
+        arg_type = Float64
+        default = 0.1
+
+        "--ps-repeats"
+        help = "number of repeats per p_s value for the Monte Carlo fractal-dimension sweep"
+        arg_type = Int
+        default = 30
+
         "--nprocs"
         help = "number of processes for distributed computing"
         arg_type = Int
@@ -182,6 +214,8 @@ if ((abspath(PROGRAM_FILE) == @__FILE__) || !isempty(PROGRAM_FILE)) && !isintera
     do_bench_dla_scaling = args["bench-dla-scaling"]
     do_eta_dimension_sweep = args["eta-dimension-sweep"]
     rerender_eta_dimension_plot = args["rerender-eta-dimension-plot"]
+    do_ps_dimension_sweep = args["ps-dimension-sweep"]
+    rerender_ps_dimension_plot = args["rerender-ps-dimension-plot"]
     backend_arg = lowercase(args["backend"])
     if backend_arg ∉ ("auto", "cpu", "metal", "cuda")
         error("Invalid --backend value '$backend_arg'. Valid options are: auto, cpu, metal, cuda.")
@@ -210,6 +244,10 @@ if ((abspath(PROGRAM_FILE) == @__FILE__) || !isempty(PROGRAM_FILE)) && !isintera
     eta_max = args["eta-max"]
     eta_step = args["eta-step"]
     eta_repeats = args["eta-repeats"]
+    ps_min = args["ps-min"]
+    ps_max = args["ps-max"]
+    ps_step = args["ps-step"]
+    ps_repeats = args["ps-repeats"]
     if n_step <= 0
         error("--n-step must be > 0")
     end
@@ -222,8 +260,18 @@ if ((abspath(PROGRAM_FILE) == @__FILE__) || !isempty(PROGRAM_FILE)) && !isintera
     if eta_min > eta_max
         error("--eta-min must be <= --eta-max")
     end
+    if ps_step <= 0
+        error("--ps-step must be > 0")
+    end
+    if ps_min > ps_max
+        error("--ps-min must be <= --ps-max")
+    end
+    if ps_min <= 0.0 || ps_max > 1.0
+        error("--ps-min and --ps-max must satisfy 0 < p_s <= 1")
+    end
     n_values = n_min:n_step:n_max
     eta_values = eta_min:eta_step:eta_max
+    p_s_values = ps_min:ps_step:ps_max
     nprocs = args["nprocs"]
     plot_output_dir = args["p"]
 
@@ -279,7 +327,19 @@ if ((abspath(PROGRAM_FILE) == @__FILE__) || !isempty(PROGRAM_FILE)) && !isintera
             @everywhere include("src/ass_2/assignment_2_2.jl")
             @everywhere using .Assignment_2_2: main as main_2_2
         end
-        @time "Assignment 2.2 completed" main_2_2(; do_bench=do_bench, do_gif=do_gif, do_cache=do_cache, use_GPU=use_GPU_runtime, backend=backend_ass2_1, solver=solver_ass2, plot_output_dir=plot_output_dir)
+        @time "Assignment 2.2 completed" main_2_2(;
+            do_bench=do_bench,
+            do_gif=do_gif,
+            do_cache=do_cache,
+            use_GPU=use_GPU_runtime,
+            backend=backend_ass2_1,
+            solver=solver_ass2,
+            do_ps_dimension_sweep=do_ps_dimension_sweep,
+            rerender_ps_dimension_plot=rerender_ps_dimension_plot,
+            p_s_values=p_s_values,
+            p_s_repeats=ps_repeats,
+            plot_output_dir=plot_output_dir,
+        )
     end
 
     # Assignment 2.3

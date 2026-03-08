@@ -224,6 +224,7 @@ function diffusion_limited_aggregation_step!(
     eta::Union{Float64,Nothing}=nothing,
     p_s::Union{Float64,Nothing}=nothing,
     candidate_picker::Function=choose_candidate,
+    mc_i_max::Int=1_000_000,
     mg_ncycles::Int=8,
     mg_levels::Int=0,
     mg_pre_sweeps::Int=2,
@@ -275,7 +276,7 @@ function diffusion_limited_aggregation_step!(
         c = solve_until_tol(solver_fn, c, tol, i_max_conv, omega_sor, c_sink; track_deltas=false, quiet=true)
         copyto!(cpu_c, c)
     end
-    chosen_cell::CartesianIndex{2} = candidate_picker(cpu_c, cpu_sink; eta=eta, p_s=p_s, c_source=c_source)
+    chosen_cell::CartesianIndex{2} = candidate_picker(cpu_c, cpu_sink; eta=eta, p_s=p_s, i_max=mc_i_max, c_source=c_source)
 
     # Not allowed to change source into sink
     if c_source[chosen_cell]
