@@ -39,6 +39,14 @@ Parse command-line arguments for controlling assignment execution.
 - `--cache`, `-c`: Use caching
 - `--backend`: Backend for Assignment 2.1 (`auto`, `cpu`, `metal`, `cuda`)
 - `--solver`: Solver for Assignment 2.x (`sor`, `rb_sor`, `multigrid`)
+- `--bench-dla-scaling`: Run scaling benchmark experiment for Assignment 2.1
+- `--n-min`, `--n-max`, `--n-step`: N-range controls for scaling benchmark
+- `--repeats`: Repeats per N/solver/backend for scaling benchmark
+- `--frames-bench`: Frames used by scaling benchmark timing runs
+- `--eta-dimension-sweep`: Run the eta sweep / fractal-dimension analysis for Assignment 2.1
+- `--rerender-eta-dimension-plot`: Rebuild the eta sweep figure from existing CSV summaries
+- `--eta-min`, `--eta-max`, `--eta-step`: Eta-range controls for the fractal-dimension sweep
+- `--eta-repeats`: Repeats per eta value for the fractal-dimension sweep
 - `-p`: Output directory for plots (default: "plots/ass_2/")
 - `--ass1`: Execute only Assignment 2.1
 - `--ass2`: Execute only Assignment 2.2
@@ -77,6 +85,63 @@ function parse_commandline()::Dict{String,Any}
         arg_type = String
         default = "rb_sor"
 
+        "--bench-dla-scaling"
+        help = "run DLA scaling benchmark experiment (Assignment 2.1)"
+        action = :store_true
+
+        "--n-min"
+        help = "minimum N for scaling benchmark"
+        arg_type = Int
+        default = 40
+
+        "--n-max"
+        help = "maximum N for scaling benchmark"
+        arg_type = Int
+        default = 200
+
+        "--n-step"
+        help = "N step for scaling benchmark"
+        arg_type = Int
+        default = 20
+
+        "--repeats"
+        help = "number of repeats per N/solver/backend for scaling benchmark"
+        arg_type = Int
+        default = 20
+
+        "--frames-bench"
+        help = "number of DLA frames per timing run in scaling benchmark"
+        arg_type = Int
+        default = 200
+
+        "--eta-dimension-sweep"
+        help = "run eta sweep / fractal-dimension analysis (Assignment 2.1)"
+        action = :store_true
+
+        "--rerender-eta-dimension-plot"
+        help = "rebuild the eta sweep figure from existing CSV summaries (Assignment 2.1)"
+        action = :store_true
+
+        "--eta-min"
+        help = "minimum eta for fractal-dimension sweep"
+        arg_type = Float64
+        default = 0.1
+
+        "--eta-max"
+        help = "maximum eta for fractal-dimension sweep"
+        arg_type = Float64
+        default = 2.0
+
+        "--eta-step"
+        help = "eta step for fractal-dimension sweep"
+        arg_type = Float64
+        default = 0.1
+
+        "--eta-repeats"
+        help = "number of repeats per eta value for the fractal-dimension sweep"
+        arg_type = Int
+        default = 30
+
         "--nprocs"
         help = "number of processes for distributed computing"
         arg_type = Int
@@ -114,23 +179,51 @@ if ((abspath(PROGRAM_FILE) == @__FILE__) || !isempty(PROGRAM_FILE)) && !isintera
     do_gif = args["gif"]
     do_cache = args["cache"]
     use_GPU = args["gpu"]
+    do_bench_dla_scaling = args["bench-dla-scaling"]
+    do_eta_dimension_sweep = args["eta-dimension-sweep"]
+    rerender_eta_dimension_plot = args["rerender-eta-dimension-plot"]
     backend_arg = lowercase(args["backend"])
     if backend_arg ∉ ("auto", "cpu", "metal", "cuda")
         error("Invalid --backend value '$backend_arg'. Valid options are: auto, cpu, metal, cuda.")
     end
-    backend_ass2_1::Symbol = Symbol(backend_arg == "auto" ? (use_GPU ? "metal" : "cpu") : backend_arg)
-    use_GPU_runtime::Bool = backend_ass2_1 == :metal
+    backend_ass2_1::Symbol = Symbol(backend_arg)
+    use_GPU_runtime::Bool = backend_ass2_1 == :metal || (backend_ass2_1 == :auto && use_GPU)
     if backend_ass2_1 == :cuda
         @info "backend=:cuda selected. Assignment 2.x will use CUDA-backed solvers where available."
     end
-    if backend_arg != "auto" && use_GPU
-        @info "--backend overrides --gpu for Assignment 2.1 selection."
+    if backend_ass2_1 == :auto && use_GPU
+        @info "--gpu is ignored for backend auto-detection. Use --backend metal to force Metal."
+    elseif backend_arg != "auto" && use_GPU
+        @info "--backend overrides --gpu selection."
     end
     solver_arg = lowercase(args["solver"])
     if solver_arg ∉ ("sor", "rb_sor", "multigrid")
         error("Invalid --solver value '$solver_arg'. Valid options are: sor, rb_sor, multigrid.")
     end
     solver_ass2::Symbol = Symbol(solver_arg)
+    n_min = args["n-min"]
+    n_max = args["n-max"]
+    n_step = args["n-step"]
+    repeats = args["repeats"]
+    frames_bench = args["frames-bench"]
+    eta_min = args["eta-min"]
+    eta_max = args["eta-max"]
+    eta_step = args["eta-step"]
+    eta_repeats = args["eta-repeats"]
+    if n_step <= 0
+        error("--n-step must be > 0")
+    end
+    if n_min > n_max
+        error("--n-min must be <= --n-max")
+    end
+    if eta_step <= 0
+        error("--eta-step must be > 0")
+    end
+    if eta_min > eta_max
+        error("--eta-min must be <= --eta-max")
+    end
+    n_values = n_min:n_step:n_max
+    eta_values = eta_min:eta_step:eta_max
     nprocs = args["nprocs"]
     plot_output_dir = args["p"]
 
@@ -167,6 +260,14 @@ if ((abspath(PROGRAM_FILE) == @__FILE__) || !isempty(PROGRAM_FILE)) && !isintera
             use_GPU=use_GPU_runtime,
             backend=backend_ass2_1,
             solver=solver_ass2,
+            do_bench_dla_scaling=do_bench_dla_scaling,
+            do_eta_dimension_sweep=do_eta_dimension_sweep,
+            rerender_eta_dimension_plot=rerender_eta_dimension_plot,
+            n_values=n_values,
+            repeats=repeats,
+            frames_bench=frames_bench,
+            eta_values=eta_values,
+            eta_repeats=eta_repeats,
             plot_output_dir=plot_output_dir,
         )
     end

@@ -1269,7 +1269,18 @@ function _coarsen_mask(mask::AbstractMatrix{Bool})::Matrix{Bool}
     ci = max(2, cld(ni, 2))
     cj = max(2, cld(nj, 2))
     coarse = zeros(Bool, ci, cj)
+    _coarsen_mask!(coarse, mask)
+    return coarse
+end
 
+"""
+    _coarsen_mask!(coarse, mask)
+
+In-place coarsening of a sink mask by 2x2 blocks (OR-reduction).
+"""
+function _coarsen_mask!(coarse::Matrix{Bool}, mask::AbstractMatrix{Bool})
+    ni, nj = size(mask)
+    ci, cj = size(coarse)
     @inbounds for jc in 1:cj
         j1 = 2 * jc - 1
         j2 = min(2 * jc, nj)
@@ -1282,7 +1293,7 @@ function _coarsen_mask(mask::AbstractMatrix{Bool})::Matrix{Bool}
 
     coarse[:, 1] .= false
     coarse[:, end] .= false
-    return coarse
+    return nothing
 end
 
 
@@ -1296,7 +1307,19 @@ function _restrict_avg(a::Matrix{Float64})::Matrix{Float64}
     ci = max(2, cld(ni, 2))
     cj = max(2, cld(nj, 2))
     coarse = zeros(Float64, ci, cj)
+    _restrict_avg!(coarse, a)
+    return coarse
+end
 
+"""
+    _restrict_avg!(coarse, a)
+
+In-place restriction from fine grid `a` into preallocated `coarse`
+using local 2x2 averaging.
+"""
+function _restrict_avg!(coarse::Matrix{Float64}, a::Matrix{Float64})
+    ni, nj = size(a)
+    ci, cj = size(coarse)
     @inbounds for jc in 1:cj
         j1 = 2 * jc - 1
         j2 = min(2 * jc, nj)
@@ -1321,7 +1344,7 @@ function _restrict_avg(a::Matrix{Float64})::Matrix{Float64}
         end
     end
 
-    return coarse
+    return nothing
 end
 
 
@@ -1338,27 +1361,16 @@ function _prolong_bilinear!(fine::Matrix{Float64}, coarse::Matrix{Float64})
     sx = ci - 1
     sy = cj - 1
 
-    i0v = Vector{Int}(undef, ni)
-    i1v = Vector{Int}(undef, ni)
-    txv = Vector{Float64}(undef, ni)
-    @inbounds for i in 1:ni
-        x = (i - 1) * sx * inv_ni + 1.0
-        i0 = clamp(floor(Int, x), 1, ci)
-        i1 = min(i0 + 1, ci)
-        i0v[i] = i0
-        i1v[i] = i1
-        txv[i] = x - i0
-    end
-
     @inbounds for j in 1:nj
         y = (j - 1) * sy * inv_nj + 1.0
         j0 = clamp(floor(Int, y), 1, cj)
         j1 = min(j0 + 1, cj)
         ty = y - j0
         for i in 1:ni
-            i0 = i0v[i]
-            i1 = i1v[i]
-            tx = txv[i]
+            x = (i - 1) * sx * inv_ni + 1.0
+            i0 = clamp(floor(Int, x), 1, ci)
+            i1 = min(i0 + 1, ci)
+            tx = x - i0
 
             c00 = coarse[i0, j0]
             c10 = coarse[i1, j0]
@@ -1411,34 +1423,83 @@ function _mg_smooth_step_cpu!(u::Matrix{Float64}, omega::Float64, sink_mask::Mat
 end
 
 
-"""
-    _mg_smooth_step_gpu!(u, omega, sink_mask, backend, c_dev, sink_dev)
+function _copy_f64_to_f32!(dst::Matrix{Float32}, src::Matrix{Float64})
+    @inbounds for j in axes(src, 2), i in axes(src, 1)
+        dst[i, j] = Float32(src[i, j])
+    end
+    return nothing
+end
 
-Perform one GPU smoothing sweep on the finest multigrid level.
-The fine-grid field `u` is transferred to device, smoothed with backend-specific
-RB-SOR (`:metal` or `:cuda`), copied back to CPU, and sink cells are re-applied.
-"""
-function _mg_smooth_step_gpu!(
+
+function _copy_f32_to_f64!(dst::Matrix{Float64}, src::Matrix{Float32})
+    @inbounds for j in axes(src, 2), i in axes(src, 1)
+        dst[i, j] = Float64(src[i, j])
+    end
+    return nothing
+end
+
+
+function _mg_smooth_many_gpu!(
+    u::Matrix{Float64},
+    omega::Float64,
+    sink_mask::Matrix{Bool},
+    ::Val{:metal},
+    c_dev::MtlMatrix{Float32,PrivateStorage},
+    sink_dev::MtlMatrix{Bool,PrivateStorage},
+    u_host32::Matrix{Float32},
+    nsweeps::Int,
+)
+    _copy_f64_to_f32!(u_host32, u)
+    copyto!(c_dev, u_host32)
+    @inbounds for _ in 1:nsweeps
+        c_next_SOR_sink_metal!(c_dev, Float32(omega), sink_dev)
+    end
+    copyto!(u_host32, c_dev)
+    _copy_f32_to_f64!(u, u_host32)
+    u[sink_mask] .= 0.0
+    return nothing
+end
+
+
+function _mg_smooth_many_gpu!(
+    u::Matrix{Float64},
+    omega::Float64,
+    sink_mask::Matrix{Bool},
+    ::Val{:cuda},
+    c_dev::CuArray{Float32,2},
+    sink_dev::CuArray{Bool,2},
+    u_host32::Matrix{Float32},
+    nsweeps::Int,
+)
+    _copy_f64_to_f32!(u_host32, u)
+    copyto!(c_dev, u_host32)
+    @inbounds for _ in 1:nsweeps
+        c_next_SOR_sink_cuda!(c_dev, Float32(omega), sink_dev)
+    end
+    copyto!(u_host32, c_dev)
+    _copy_f32_to_f64!(u, u_host32)
+    u[sink_mask] .= 0.0
+    return nothing
+end
+
+
+function _mg_smooth_many_gpu!(
     u::Matrix{Float64},
     omega::Float64,
     sink_mask::Matrix{Bool},
     backend::Symbol,
     c_dev,
     sink_dev,
+    u_host32::Matrix{Float32},
+    nsweeps::Int,
 )
-    if backend == :metal
-        copyto!(c_dev, Matrix{Float32}(u))
-        c_next_SOR_sink_metal!(c_dev, Float32(omega), sink_dev)
-        copyto!(u, Float64.(Array(c_dev)))
-    elseif backend == :cuda
-        copyto!(c_dev, Matrix{Float32}(u))
-        c_next_SOR_sink_cuda!(c_dev, Float32(omega), sink_dev)
-        copyto!(u, Float64.(Array(c_dev)))
-    else
-        throw(ArgumentError("Unknown backend '$backend' for GPU smoother."))
+    if nsweeps <= 0
+        return nothing
     end
-    u[sink_mask] .= 0.0
-    return nothing
+    if backend == :metal || backend == :cuda
+        return _mg_smooth_many_gpu!(u, omega, sink_mask, Val(backend), c_dev, sink_dev, u_host32, nsweeps)
+    end
+    throw(ArgumentError("Unknown backend '$backend' for GPU smoother."))
 end
 
 
@@ -1469,15 +1530,14 @@ end
 
 
 """
-    _laplace_mg_vcycle!(u, sink_mask, level, max_level, omega, smoother, pre_sweeps, post_sweeps, coarse_sweeps, backend, c_dev, sink_dev)
+    _laplace_mg_vcycle!(u_levels, mask_levels, level, max_level, omega, smoother, pre_sweeps, post_sweeps, coarse_sweeps, backend, c_dev, sink_dev, u_host32)
 
-Run one recursive multigrid V-cycle for the Laplace problem with sinks.
-Pre/post smoothing is backend-aware only at the finest level (`level == 1`);
-coarser levels use CPU smoothing.
+Run one recursive multigrid V-cycle for Laplace with sinks using preallocated
+hierarchy buffers. Finest-level smoothing can be offloaded to GPU backends.
 """
 function _laplace_mg_vcycle!(
-    u::Matrix{Float64},
-    sink_mask::Matrix{Bool},
+    u_levels::Vector{Matrix{Float64}},
+    mask_levels::Vector{Matrix{Bool}},
     level::Int,
     max_level::Int,
     omega::Float64,
@@ -1488,8 +1548,11 @@ function _laplace_mg_vcycle!(
     backend::Symbol,
     c_dev,
     sink_dev,
+    u_host32::Union{Nothing,Matrix{Float32}},
 )
-    # Coarsest level: smooth only on CPU
+    u = u_levels[level]
+    sink_mask = mask_levels[level]
+
     if level >= max_level || min(size(u)...) <= 5
         for _ in 1:coarse_sweeps
             _mg_smooth_step_cpu!(u, omega, sink_mask, smoother)
@@ -1498,21 +1561,22 @@ function _laplace_mg_vcycle!(
         return nothing
     end
 
-    # Pre-smoothing: backend acceleration only on finest level
-    for _ in 1:pre_sweeps
-        if level == 1 && backend != :cpu
-            _mg_smooth_step_gpu!(u, omega, sink_mask, backend, c_dev, sink_dev)
-        else
+    if level == 1 && backend != :cpu
+        _mg_smooth_many_gpu!(u, omega, sink_mask, backend, c_dev, sink_dev, u_host32::Matrix{Float32}, pre_sweeps)
+    else
+        for _ in 1:pre_sweeps
             _mg_smooth_step_cpu!(u, omega, sink_mask, smoother)
         end
     end
 
-    # Coarse correction (same scheme as archive implementation)
-    u_coarse = _restrict_avg(u)
-    sink_mask_coarse = _coarsen_mask(sink_mask)
+    u_coarse = u_levels[level + 1]
+    sink_mask_coarse = mask_levels[level + 1]
+    _restrict_avg!(u_coarse, u)
+    _coarsen_mask!(sink_mask_coarse, sink_mask)
+
     _laplace_mg_vcycle!(
-        u_coarse,
-        sink_mask_coarse,
+        u_levels,
+        mask_levels,
         level + 1,
         max_level,
         omega,
@@ -1523,15 +1587,16 @@ function _laplace_mg_vcycle!(
         :cpu,
         nothing,
         nothing,
+        nothing,
     )
 
     _prolong_bilinear!(u, u_coarse)
     _apply_bc_and_sink!(u, sink_mask)
 
-    for _ in 1:post_sweeps
-        if level == 1 && backend != :cpu
-            _mg_smooth_step_gpu!(u, omega, sink_mask, backend, c_dev, sink_dev)
-        else
+    if level == 1 && backend != :cpu
+        _mg_smooth_many_gpu!(u, omega, sink_mask, backend, c_dev, sink_dev, u_host32::Matrix{Float32}, post_sweeps)
+    else
+        for _ in 1:post_sweeps
             _mg_smooth_step_cpu!(u, omega, sink_mask, smoother)
         end
     end
@@ -1587,21 +1652,37 @@ function laplace_multigrid!(
     sink_mask = _sink_mask_from_indices(size(c), sink_indices)
     _apply_bc_and_sink!(c, sink_mask)
 
+    # Preallocate hierarchy buffers once per multigrid solve.
+    u_levels = Vector{Matrix{Float64}}(undef, nlevels)
+    mask_levels = Vector{Matrix{Bool}}(undef, nlevels)
+    u_levels[1] = c
+    mask_levels[1] = sink_mask
+    for level in 2:nlevels
+        nfi, nfj = size(u_levels[level - 1])
+        ci = max(2, cld(nfi, 2))
+        cj = max(2, cld(nfj, 2))
+        u_levels[level] = zeros(Float64, ci, cj)
+        mask_levels[level] = zeros(Bool, ci, cj)
+    end
+
     c_dev = nothing
     sink_dev = nothing
+    u_host32 = nothing
     if backend == :metal
         c_dev = MtlMatrix(Matrix{Float32}(c))
         sink_dev = MtlMatrix(sink_mask)
+        u_host32 = Matrix{Float32}(undef, size(c)...)
     elseif backend == :cuda
         c_dev = CuArray(Matrix{Float32}(c))
         sink_dev = CuArray(sink_mask)
+        u_host32 = Matrix{Float32}(undef, size(c)...)
     end
 
     max_res = Inf
     for _ in 1:ncycles
         _laplace_mg_vcycle!(
-            c,
-            sink_mask,
+            u_levels,
+            mask_levels,
             1,
             nlevels,
             omega,
@@ -1612,6 +1693,7 @@ function laplace_multigrid!(
             backend,
             c_dev,
             sink_dev,
+            u_host32,
         )
         max_res = _max_laplace_residual(c, sink_mask)
         if max_res < tol

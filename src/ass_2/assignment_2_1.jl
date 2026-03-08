@@ -11,7 +11,7 @@ include("../helpers/__init__.jl")
 # Diffusion helpers
 using .Helpers: Diffusion
 using .Helpers.Diffusion: solve_until_tol, c_next_SOR_sink!, c_next_SOR_sink_red_black!, solve_until_tol_metal!, c_next_SOR_sink_metal!, solve_until_tol_cuda!, c_next_SOR_sink_cuda!
-using .Helpers.DLAUtil: run_diffusion_limited_aggregation
+using .Helpers.DLAUtil: run_diffusion_limited_aggregation, run_dla_scaling_experiment, run_eta_dimension_experiment, rerender_eta_dimension_plot_from_csv
 
 # Plotting
 using .Helpers.SaveFig: savefig_auto_folder
@@ -226,6 +226,14 @@ function main(;
     mg_post_sweeps::Int=2,
     mg_coarse_sweeps::Int=30,
     mg_smoother::Symbol=:rb_sor,
+    do_bench_dla_scaling::Bool=false,
+    do_eta_dimension_sweep::Bool=false,
+    rerender_eta_dimension_plot::Bool=false,
+    n_values=40:20:200,
+    repeats::Int=20,
+    frames_bench::Int=200,
+    eta_values=0.1:0.1:2.0,
+    eta_repeats::Int=30,
     do_bench::Bool=false,
     do_gif::Bool=false,
     do_cache::Bool=false,
@@ -241,6 +249,55 @@ function main(;
 
     if do_bench
         run_bench(; N=N, L=L, omega=omega_sor, tol=tol, backend=backend, plot_output_dir=plot_output_dir)
+    end
+    if do_bench_dla_scaling
+        run_dla_scaling_experiment(
+            N_values=n_values,
+            repeats=repeats,
+            L=L,
+            tol=tol,
+            frames=frames_bench,
+            i_max_conv=i_max,
+            omega_sor=omega_sor,
+            eta=eta,
+            backend=backend,
+            mg_ncycles=mg_ncycles,
+            mg_levels=mg_levels,
+            mg_pre_sweeps=mg_pre_sweeps,
+            mg_post_sweeps=mg_post_sweeps,
+            mg_coarse_sweeps=mg_coarse_sweeps,
+            mg_smoother=mg_smoother,
+            output_dir=plot_output_dir,
+            save_csv=true,
+        )
+        return
+    end
+    if do_eta_dimension_sweep
+        run_eta_dimension_experiment(
+            N=N,
+            L=L,
+            tol=tol,
+            frames=frames,
+            i_max_conv=i_max,
+            omega_sor=omega_sor,
+            eta_values=eta_values,
+            repeats=eta_repeats,
+            backend=backend,
+            solver=solver,
+            mg_ncycles=mg_ncycles,
+            mg_levels=mg_levels,
+            mg_pre_sweeps=mg_pre_sweeps,
+            mg_post_sweeps=mg_post_sweeps,
+            mg_coarse_sweeps=mg_coarse_sweeps,
+            mg_smoother=mg_smoother,
+            output_dir=plot_output_dir,
+            save_csv=true,
+        )
+        return
+    end
+    if rerender_eta_dimension_plot
+        rerender_eta_dimension_plot_from_csv(input_dir=plot_output_dir)
+        return
     end
 
     @time "Finished diffusion limited aggregation" run_diffusion_limited_aggregation(

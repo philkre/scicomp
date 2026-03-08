@@ -237,9 +237,8 @@ function diffusion_limited_aggregation_step!(
     end
 
     if solver == :multigrid
-        c_cpu = Matrix{Float64}(cpu_c)
         laplace_multigrid!(
-            c_cpu;
+            cpu_c;
             sink_indices=findall(cpu_sink),
             omega=omega_sor,
             smoother=mg_smoother,
@@ -251,9 +250,8 @@ function diffusion_limited_aggregation_step!(
             tol=tol,
             backend=backend,
         )
-        copyto!(cpu_c, c_cpu)
         if backend == :metal || backend == :cuda
-            copyto!(c, Matrix{Float32}(c_cpu))
+            copyto!(c, Matrix{Float32}(cpu_c))
             copyto!(c_sink, cpu_sink)
         end
     elseif backend == :metal

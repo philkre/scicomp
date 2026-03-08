@@ -1,0 +1,4 @@
+N,backend,solver,repeat,time_s
+10,cpu,sor,1,5.95e-5
+10,cpu,rb_sor,1,5.8541e-5
+10,cpu,multigrid,1,8.6417e-5
