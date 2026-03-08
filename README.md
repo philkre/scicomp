@@ -41,3 +41,4 @@ Optional flags: run this command to see optional flags for assignment 2
 ```bash
 julia --project=. assignment_2.jl -h
 ```
+Plots where execution times are long will be generated from the saved .csv files. The large grid scaling examples for instance took more than twentyfour hours to run.
