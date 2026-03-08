@@ -7,6 +7,7 @@ using Distributed: @everywhere
 
 include("src/helpers/__init__.jl")
 using .Helpers.DistributedUtil: set_procs, maximize_workers
+using .Helpers.DLAUtil: rerender_all_assignment_2_plots_from_csv
 
 # Globals
 "Do benchmarking (default behavior)"
@@ -45,6 +46,7 @@ Parse command-line arguments for controlling assignment execution.
 - `--frames-bench`: Frames used by scaling benchmark timing runs
 - `--eta-dimension-sweep`: Run the eta sweep / fractal-dimension analysis for Assignment 2.1
 - `--rerender-eta-dimension-plot`: Rebuild the eta sweep figure from existing CSV summaries
+- `--rerender-all-csv-plots`: Rebuild all Assignment 2 CSV-backed figures (scaling, eta sweep, p_s sweep)
 - `--eta-min`, `--eta-max`, `--eta-step`: Eta-range controls for the fractal-dimension sweep
 - `--eta-repeats`: Repeats per eta value for the fractal-dimension sweep
 - `--ps-dimension-sweep`: Run the stickiness sweep / fractal-dimension analysis for Assignment 2.2
@@ -124,6 +126,10 @@ function parse_commandline()::Dict{String,Any}
 
         "--rerender-eta-dimension-plot"
         help = "rebuild the eta sweep figure from existing CSV summaries (Assignment 2.1)"
+        action = :store_true
+
+        "--rerender-all-csv-plots"
+        help = "rebuild all Assignment 2 CSV-backed figures from existing summaries"
         action = :store_true
 
         "--eta-min"
@@ -214,6 +220,7 @@ if ((abspath(PROGRAM_FILE) == @__FILE__) || !isempty(PROGRAM_FILE)) && !isintera
     do_bench_dla_scaling = args["bench-dla-scaling"]
     do_eta_dimension_sweep = args["eta-dimension-sweep"]
     rerender_eta_dimension_plot = args["rerender-eta-dimension-plot"]
+    rerender_all_csv_plots = args["rerender-all-csv-plots"]
     do_ps_dimension_sweep = args["ps-dimension-sweep"]
     rerender_ps_dimension_plot = args["rerender-ps-dimension-plot"]
     backend_arg = lowercase(args["backend"])
@@ -274,6 +281,11 @@ if ((abspath(PROGRAM_FILE) == @__FILE__) || !isempty(PROGRAM_FILE)) && !isintera
     p_s_values = ps_min:ps_step:ps_max
     nprocs = args["nprocs"]
     plot_output_dir = args["p"]
+
+    if rerender_all_csv_plots
+        rerender_all_assignment_2_plots_from_csv(input_dir=plot_output_dir)
+        return
+    end
 
     # Only ignore default behavior if any of the assignment flags are set, otherwise run all assignments by default
     _ass1 = args["ass1"]

@@ -233,7 +233,11 @@ function _read_eta_summary_csv(path::String, field_types::Vector{Pair{Symbol,Dat
             parsed = Any[]
             for (idx, (name, T)) in enumerate(field_types)
                 push!(names, name)
-                push!(parsed, parse(T, values[idx]))
+                if T == Symbol
+                    push!(parsed, Symbol(values[idx]))
+                else
+                    push!(parsed, parse(T, values[idx]))
+                end
             end
             push!(rows, NamedTuple{Tuple(names)}(Tuple(parsed)))
         end
@@ -878,6 +882,21 @@ function _write_timing_csv(path::String, rows::Vector{NamedTuple}; summary::Bool
 end
 
 
+function _read_timing_summary_csv(path::String)
+    return _read_eta_summary_csv(
+        path,
+        [
+            :N => Int,
+            :backend => Symbol,
+            :solver => Symbol,
+            :mean_time_s => Float64,
+            :std_time_s => Float64,
+            :n_repeats => Int,
+        ],
+    )
+end
+
+
 function _plot_dla_scaling(summary_rows::Vector{NamedTuple}; output_path::String)
     combos = unique((r.backend, r.solver) for r in summary_rows)
     p = plot(
@@ -896,6 +915,46 @@ function _plot_dla_scaling(summary_rows::Vector{NamedTuple}; output_path::String
     end
     savefig_auto_folder(p, output_path)
     return p
+end
+
+
+function rerender_dla_scaling_plot_from_csv(;
+    input_dir::String="plots/ass_2",
+    output_path::String=joinpath(input_dir, "dla_scaling_time_vs_N.png"),
+)
+    summary_rows = _read_timing_summary_csv(joinpath(input_dir, "dla_scaling_summary.csv"))
+    return _plot_dla_scaling(summary_rows; output_path=output_path)
+end
+
+
+function rerender_all_assignment_2_plots_from_csv(; input_dir::String="plots/ass_2")
+    rebuilt = NamedTuple[]
+    found_any = false
+
+    for (dir, _, files) in walkdir(input_dir)
+        file_set = Set(files)
+
+        if "dla_scaling_summary.csv" in file_set
+            rerender_dla_scaling_plot_from_csv(input_dir=dir)
+            push!(rebuilt, (dir=dir, figure=:dla_scaling))
+            found_any = true
+        end
+
+        if "eta_sweep_trajectory_summary.csv" in file_set && "eta_sweep_dimension_summary.csv" in file_set
+            rerender_eta_dimension_plot_from_csv(input_dir=dir)
+            push!(rebuilt, (dir=dir, figure=:eta_sweep))
+            found_any = true
+        end
+
+        if "p_s_sweep_trajectory_summary.csv" in file_set && "p_s_sweep_dimension_summary.csv" in file_set
+            rerender_ps_dimension_plot_from_csv(input_dir=dir)
+            push!(rebuilt, (dir=dir, figure=:p_s_sweep))
+            found_any = true
+        end
+    end
+
+    found_any || @warn "No Assignment 2 CSV summaries found under $input_dir."
+    return rebuilt
 end
 
 
