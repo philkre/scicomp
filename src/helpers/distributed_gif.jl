@@ -37,6 +37,64 @@ function gif_slow(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifpath::String; f
     gif(anim, gifpath, fps=fps)
 end
 
+"""
+    distributed_anim(plots::Vector{Plots.Plot{Plots.GRBackend}})::Animation
+
+Create an Animation object from a vector of plots using distributed computing to save frames in parallel.
+
+# Arguments
+- `plots::Vector{Plots.Plot{Plots.GRBackend}}`: Vector of plot objects to animate
+
+# Returns
+- `Animation`: A Plots.jl Animation object with frames saved to disk and frame paths registered
+
+# Details
+This function:
+- Saves each plot as a PNG frame in parallel across distributed workers
+- Uses a progress bar to track frame generation
+- Maintains frame order via a coordinated channel between master and workers
+- Cleans up and organizes frames before returning the Animation object
+
+# Notes
+- Requires distributed workers to be available (set up via `Distributed.addprocs()`)
+- Frames are saved to a temporary directory managed by the Animation object
+- The Animation directory is NOT cleaned up by this function; caller is responsible for cleanup
+"""
+function distributed_anim(plots::Vector{Plots.Plot{Plots.GRBackend}})::Animation
+    anim = Animation()
+    n = length(plots)
+
+    # Initialize progress bar 
+    prog = Progress(n, 1, "Saving GIF frames...")
+    # Create a RemoteChannel to track progress across distributed workers
+    ch = RemoteChannel(() -> Channel{Int}(n))  # buffer n updates
+    # consumer task on master that updates the progress bar
+    t = @async begin
+        for _ in 1:n
+            take!(ch)
+            next!(prog)
+        end
+    end
+
+    # Save frames in parallel using distributed workers
+    @sync @distributed for i in 1:n
+        p = plots[i]
+        # savefig(p, "$(tmp_dirname)/frame_$(lpad(i, pad_length, '0')).png")
+        filename = @sprintf "%06d.png" i
+        png(p, joinpath(anim.dir, filename))
+        put!(ch, 1)
+    end
+    wait(t)  # Ensure the progress bar task completes before proceeding
+
+    # Make sure to add frames in the correct order 
+    for i in 1:n
+        filename = @sprintf "%06d.png" i
+        push!(anim.frames, joinpath(anim.dir, filename))
+    end
+
+    return anim
+end
+
 
 """
     run_ffmpeg(anim_dir::String, fps::Int64, frame_pattern::String, gifpath::String, hwaccel_option::Cmd, do_palette::Bool, verbose_level::Int, width::Int)
@@ -118,38 +176,12 @@ Create an animated GIF from a vector of plots using distributed computing and FF
 - With `do_palette=true`, generates an optimized palette for better color reproduction
 - Uses OpenCL hardware acceleration on macOS when available
 """
-function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifpath::String; fps::Int64=30, do_palette=false, width::Int=nothing, use_ffmpeg::Bool=true, verbose::Bool=false, hwaccel::String="OpenCL", mp4 = false)
+function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifpath::String; fps::Int64=30, do_palette=false, width::Int=nothing, use_ffmpeg::Bool=true, verbose::Bool=false, hwaccel::String="OpenCL")
     # Parse arguments
     verbose_level = (verbose ? 32 : 16) # "error"
     width = isnothing(width) ? plots[1].attr[:size][1] : width  # Default to width of first plot if not specified
 
-    anim = Animation()
-    n = length(plots)
-    prog = Progress(n, 1, "Saving GIF frames...")
-
-    ch = RemoteChannel(() -> Channel{Int}(n))  # buffer n updates
-    # consumer task on master that updates the progress bar
-    t = @async begin
-        for _ in 1:n
-            take!(ch)
-            next!(prog)
-        end
-    end
-
-    # Save frames in parallel using distributed workers
-    @sync @distributed for i in 1:n
-        p = plots[i]
-        # savefig(p, "$(tmp_dirname)/frame_$(lpad(i, pad_length, '0')).png")
-        filename = @sprintf "%06d.png" i
-        png(p, joinpath(anim.dir, filename))
-        put!(ch, 1)
-    end
-    wait(t)  # Ensure the progress bar task completes before proceeding
-    # Make sure to add frames in the correct order 
-    for i in 1:n
-        filename = @sprintf "%06d.png" i
-        push!(anim.frames, joinpath(anim.dir, filename))
-    end
+    anim = distributed_anim(plots)  # Create animation and save frames in parallel
 
     # Build full path pattern for ffmpeg
     frame_pattern = joinpath(anim.dir, "%06d.png")
@@ -166,13 +198,6 @@ function distributed_gif(plots::Vector{Plots.Plot{Plots.GRBackend}}, gifpath::St
                 @warn "FFMPEG failed with error: $e. Falling back to built-in GIF creation method."
                 gif(anim, gifpath, fps=fps)
             end
-        end
-    else
-        # Use native gif or mp4-function
-        if mp4
-            mp4(anim, gifpath, fps=fps)
-        else
-            gif(anim, gifpath, fps=fps)
         end
     end
 

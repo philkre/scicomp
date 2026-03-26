@@ -1011,6 +1011,130 @@ end
 
 
 """
+    c_next_SOR_sink_red_black!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool})::Matrix{Float64}
+
+Compute the next iteration using SOR with red-black ordering and sink regions.
+
+# Arguments
+- `c::Matrix{Float64}`: Concentration field (modified in-place)
+- `omega::Float64`: Relaxation parameter
+- `sink_mask::Matrix{Bool}`: Boolean mask indicating sink regions (true = sink)
+
+# Returns
+- `Matrix{Float64}`: Reference to the updated concentration field
+
+# Notes
+Uses red-black Gauss-Seidel ordering to enable vectorization with `@turbo`. Updates are split into:
+- Red cells: where (i+j) is even
+- Black cells: where (i+j) is odd
+
+Cells marked as sinks have their concentration fixed at 0.0 after both passes complete.
+"""
+function c_next_SOR_sink_red_black_turbo!(c::Matrix{Float64}, omega::Float64, sink_mask::Matrix{Bool})::Matrix{Float64}
+    N = size(c, 1)
+    if isodd(N)
+        @warn "Current implementation of c_next_SOR_sink_red_black! assumes an even grid size for proper red-black ordering. Results may be incorrect for odd N."
+    end
+    Fo = 0.25 * omega
+
+    # Red pass: i+j = even 
+    # Red pass: update cells for even rows, even columns (even + even = even)
+    @inbounds for i in 2:2:N-1
+        @inbounds @turbo for j in 2:2:N-1
+            c[i, j] = Fo * (
+                c[i+1, j] +
+                c[i-1, j] +
+                c[i, j+1] +
+                c[i, j-1]
+            ) + (1 - omega) * c[i, j]
+        end
+    end
+    # Red pass: update cells for uneven rows, uneven columns (odd + odd = even)
+    @inbounds for i in 3:2:N-1
+        @inbounds @turbo for j in 3:2:N-1
+            c[i, j] = Fo * (
+                c[i+1, j] +
+                c[i-1, j] +
+                c[i, j+1] +
+                c[i, j-1]
+            ) + (1 - omega) * c[i, j]
+        end
+    end
+    # Do boundary pass - Red cells (i+j = even) on the boundaries
+    @inbounds @turbo for j in 3:2:N-1
+        # Left boundary
+        c[1, j] = Fo * (
+            c[2, j] +
+            c[N, j] +
+            c[1, j+1] +
+            c[1, j-1]
+        ) + (1 - omega) * c[1, j]
+
+    end
+    @inbounds @turbo for j in 2:2:N-1
+        # Right boundary
+        c[N, j] = Fo * (
+            c[1, j] +
+            c[N-1, j] +
+            c[N, j+1] +
+            c[N, j-1]
+        ) + (1 - omega) * c[N, j]
+    end
+
+    # Apply sink mask after red pass to ensure sinks remain at 0 before black pass updates
+    c[sink_mask] .= 0.0
+
+    # Black pass: i+j = odd
+    # Black pass: update cells for even rows, uneven columns (even + odd = odd)
+    @inbounds for i in 2:2:N-1
+        @inbounds @turbo for j in 3:2:N-1
+            c[i, j] = Fo * (
+                c[i+1, j] +
+                c[i-1, j] +
+                c[i, j+1] +
+                c[i, j-1]
+            ) + (1 - omega) * c[i, j]
+        end
+    end
+    # Black pass: update cells for uneven rows, even columns (odd + even = odd)
+    @inbounds for i in 3:2:N-1
+        @inbounds @turbo for j in 2:2:N-1
+            c[i, j] = Fo * (
+                c[i+1, j] +
+                c[i-1, j] +
+                c[i, j+1] +
+                c[i, j-1]
+            ) + (1 - omega) * c[i, j]
+        end
+    end
+    # Do boundary pass - Black cells (i+j = odd) on the boundaries
+    @inbounds @turbo for j in 2:2:N-1
+        # Left boundary
+        c[1, j] = Fo * (
+            c[2, j] +
+            c[N, j] +
+            c[1, j+1] +
+            c[1, j-1]
+        ) + (1 - omega) * c[1, j]
+    end
+    @inbounds @turbo for j in 3:2:N-1
+        # Right boundary
+        c[N, j] = Fo * (
+            c[1, j] +
+            c[N-1, j] +
+            c[N, j+1] +
+            c[N, j-1]
+        ) + (1 - omega) * c[N, j]
+    end
+
+    # Apply sink mask after both passes
+    c[sink_mask] .= 0.0
+
+    return c
+end
+
+
+"""
     c_next_SOR_kernel_metal!(c::MtlDeviceMatrix{Float32,1}, sink_mask::MtlDeviceMatrix{Bool,1}, Fo::Float32, omega::Float32, N::Int, color::Int32)
 
 Metal GPU kernel for SOR iteration with red-black ordering and sink regions.
@@ -1207,7 +1331,7 @@ function c_next_SOR_sink_insulate!(c::Matrix{Float64}, omega::Float64; sink_mask
     do_insulate = any(insulate_mask)
 
     # Apply sink mask
-    if do_si_mg_smooth_step_cpu!nk
+    if do_sink
         c[sink_mask] .= 0.0
     end
 
@@ -1569,8 +1693,8 @@ function _laplace_mg_vcycle!(
         end
     end
 
-    u_coarse = u_levels[level + 1]
-    sink_mask_coarse = mask_levels[level + 1]
+    u_coarse = u_levels[level+1]
+    sink_mask_coarse = mask_levels[level+1]
     _restrict_avg!(u_coarse, u)
     _coarsen_mask!(sink_mask_coarse, sink_mask)
 
@@ -1658,7 +1782,7 @@ function laplace_multigrid!(
     u_levels[1] = c
     mask_levels[1] = sink_mask
     for level in 2:nlevels
-        nfi, nfj = size(u_levels[level - 1])
+        nfi, nfj = size(u_levels[level-1])
         ci = max(2, cld(nfi, 2))
         cj = max(2, cld(nfj, 2))
         u_levels[level] = zeros(Float64, ci, cj)
