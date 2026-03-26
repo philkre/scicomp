@@ -31,26 +31,39 @@ function create_F_field(x_r, y_r, stepsize; A=10^4, sigma=0.2)
     return [foo(x, y) for x in 0:stepsize:8-stepsize, y in 0:stepsize:10-stepsize]
 end
 
+function generate_walls_mask(width::Float64=10.0, height::Float64=8.0; Nx::Int64=1000, Ny::Int64=800, wallthickness::Float64=0.15)::Matrix{Int64}
+    mask = zeros(Int64, Nx, Ny)
+    scale_x = Nx / width
+    scale_y = Ny / height
 
-function inside_walls_mask()
-    discretisations = Int(1 / 0.005)
-    mask = zeros(8 * discretisations, 10 * discretisations)
+    """Meters to index x-direction (right boundary)"""
+    ixr = (x) -> Int(floor(x * scale_x))
+    """Meters to index x-direction (left boundary)"""
+    ixl = (x) -> Int(ceil(x * scale_x))
+    """Meters to index y-direction (top boundary)"""
+    iyt = (y) -> Int(floor(y * scale_y))
+    """Meters to index y-direction (bottom boundary)"""
+    iyb = (y) -> Int(ceil(y * scale_y))
 
-    #inner walls 
-    mask[586:615, 1:600] .= 2
-    mask[586:615, 800:1199] .= 2
-    mask[586:615, 1400:end-1] .= 2
+    wt = wallthickness
+    wt2 = wallthickness / 2
 
-    mask[1:400, 486:515] .= 2
-    mask[1:300, 1386:1415] .= 2
-    mask[500:599, 1386:1415] .= 2
-    mask[601:end, 1186:1215] .= 2
+    # Inner walls
+    mask[1:ixl(3)-1, iyb(3 - wt2):iyb(3 + wt2)-1] .= 2 # livingroom horzontal side left of door
+    mask[ixl(4):ixl(6)-1, iyb(3 - wt2):iyb(3 + wt2)-1] .= 2 # livingroom horzontal side right of door
+    mask[ixl(6 - wt2):ixl(6 + wt2)-1, iyb(3):end] .= 2 # livingroom vertical side 
 
-    #edges
-    mask[1:30, :] .= 1
-    mask[end-29:end, :] .= 1
-    mask[:, 1:30] .= 1
-    mask[:, end-29:end] .= 1
+    mask[ixl(7):end, iyb(3 - wt2):iyb(3 + wt2)-1] .= 2 # bathroom horzontal side
+    mask[ixl(7 - wt2):ixl(7 + wt2)-1, 1:iyb(1.5)-1] .= 2 # bathroom vertical side beneath door
+    mask[ixl(7 - wt2):ixl(7 + wt2)-1, iyb(2.5):iyb(3)-1] .= 2 # bathroom vertical side above door
+
+    mask[ixl(2.5 - wt2):ixl(2.5 + wt2)-1, 1:iyb(2)] .= 2 # kitchen vertical side
+
+    # Boundaries
+    mask[:, 1:iyb(wt)] .= 1 # bottom
+    mask[:, end-iyb(wt)+1:end] .= 1 # top
+    mask[1:ixl(wt), :] .= 1 # left
+    mask[end-ixl(wt)+1:end, :] .= 1 # right
 
     return mask
 end
@@ -242,7 +255,7 @@ function optimize_locations_along_wall()
     u_grid = zeros(Float64, Int(8 / h), Int(10 / h))
 
     #create mask, will be reused by all runs
-    mask = inside_walls_mask()
+    mask = generate_walls_mask()
 
     along_wall_locations = [(2.8, 2), (2.8, 3), (2.8, 4), (2.8, 5), (2.8, 6),
         (3, 6.2), (4, 6.2), (5, 6.2), (6.2, 5), (5, 1), (1, 2), (1.5, 9), (7, 9)]
