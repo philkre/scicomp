@@ -31,6 +31,7 @@ function create_F_field(x_r, y_r, stepsize; A=10^4, sigma=0.2)
     return [foo(x, y) for x in 0:stepsize:8-stepsize, y in 0:stepsize:10-stepsize]
 end
 
+
 function generate_walls_mask(width::Float64=10.0, height::Float64=8.0; Nx::Int64=1000, Ny::Int64=800, wallthickness::Float64=0.15)::Matrix{Int64}
     mask = zeros(Int64, Nx, Ny)
     scale_x = Nx / width
