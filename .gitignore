@@ -40,3 +40,4 @@ JuliaLocalPreferences.toml
 Scientific_Computing_Assignments.pdf
 tmp*/
 .CondaPkg/
+.vscode/
