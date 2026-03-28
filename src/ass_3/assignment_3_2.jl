@@ -332,9 +332,12 @@ function distributed_scoring!(
 
     # Initialize progress bar 
     n = length(locations)
-    prog = Progress(n, 1, "Saving GIF frames...")
+    prog = Progress(n, 1, "Scoring locations...")
     # Create a RemoteChannel to track progress across distributed workers
     ch = RemoteChannel(() -> Channel{Int}(n))  # buffer n updates
+    # RemoteChannel to collect results back on master
+    results_ch = RemoteChannel(() -> Channel{Tuple{Tuple{Float64,Float64},Float64}}(n))
+
     # consumer task on master that updates the progress bar
     t = @async begin
         for _ in 1:n
@@ -351,7 +354,8 @@ function distributed_scoring!(
         u_vec = F \ b                               # 1.05s -> # 0.07s
         u = reshape(u_vec, u_shape)                 # 0s -> # 0s
         measurement = check_signals(u, h)           # 0.00004s -> # 0.00001s
-        result_dict[loc] = measurement
+
+        put!(results_ch, (loc, measurement))
 
         if do_plot
             @time "build_FDM_wifi_plot" begin
@@ -363,6 +367,12 @@ function distributed_scoring!(
     end
 
     wait(t) # ensure progress bar finishes after all workers are done
+
+    # Collect results from the channel
+    for _ in 1:n
+        loc, measurement = take!(results_ch)
+        result_dict[loc] = measurement
+    end
 
     return result_dict
 end
