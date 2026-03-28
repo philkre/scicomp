@@ -32,7 +32,7 @@ function create_F_field(x_r, y_r, stepsize; A=10^4, sigma=0.2)
 end
 
 
-function generate_walls_mask(width::Float64=10.0, height::Float64=8.0; Nx::Int64=1000, Ny::Int64=800, wallthickness::Float64=0.15)::Matrix{Int64}
+function generate_walls_mask(width::Float64=10.0, height::Float64=8.0; Nx::Int64=2000, Ny::Int64=1600, wallthickness::Float64=0.15)::Matrix{Int64}
     mask = zeros(Int64, Nx, Ny)
     scale_x = Nx / width
     scale_y = Ny / height
@@ -262,7 +262,7 @@ function optimize_locations_along_wall(; do_plot=false, save_plots=false, plot_o
     u_grid = zeros(Float64, Int(8 / h), Int(10 / h))
 
     #create mask, will be reused by all runs
-    mask = generate_walls_mask()
+    mask = Matrix(generate_walls_mask()')
 
     along_wall_locations = [(2.8, 2), (2.8, 3), (2.8, 4), (2.8, 5), (2.8, 6),
         (3, 6.2), (4, 6.2), (5, 6.2), (6.2, 5), (5, 1), (1, 2), (1.5, 9), (7, 9)]
