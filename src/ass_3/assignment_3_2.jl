@@ -303,12 +303,12 @@ function optimize_locations_along_wall(; do_plot=false, save_plots=false, plot_o
     @showprogress for (idx, loc) in enumerate(along_wall_locations)
         @time "Done optimizing for location $loc" begin
             x_i, y_i = loc
-            @time "f_field" f_field = create_F_field(x_i, y_i, h)       # 0.02s -> # 0.001s
-            @time "build_rhs" b = build_rhs(f_field, h)                 # 0.01s -> # 0.0009s
+            f_field = create_F_field(x_i, y_i, h)       # 0.02s -> # 0.001s
+            b = build_rhs(f_field, h)                 # 0.01s -> # 0.0009s
             # back-substitution only, much faster than A \ b
-            @time "u_vec" u_vec = F \ b                                 # 1.05s -> # 0.07s
-            @time "reshape" u = reshape(u_vec, size(u_grid))            # 0s -> # 0s
-            @time "measurement" measurement = check_signals(u, h)       # 0.00004s -> # 0.00001s
+            u_vec = F \ b                                 # 1.05s -> # 0.07s
+            u = reshape(u_vec, size(u_grid))            # 0s -> # 0s
+            measurement = check_signals(u, h)       # 0.00004s -> # 0.00001s
             println("at $loc found: $measurement")
 
             if do_plot
@@ -333,7 +333,7 @@ function main(;
     end
 
     @time "Done optimizing locations along wall" begin
-        optimize_locations_along_wall(; do_plot=true, save_plots=true, plot_output_dir=plot_output_dir)
+        optimize_locations_along_wall(; do_plot=false, save_plots=true, plot_output_dir=plot_output_dir)
     end
 
     return
