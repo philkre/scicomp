@@ -117,7 +117,7 @@ function generate_walls_mask(width::Float64=10.0, height::Float64=8.0; Nx::Int64
 end
 
 
-function find_mask_val(index, h_grid, mask; h_mask=0.005)
+function find_mask_val(index, h_grid, mask; h_mask=0.005)::Int64
     i, j = index
     scalar = h_grid / h_mask           # e.g. 0.1 / 0.005 = 20.0
 
@@ -397,7 +397,7 @@ function optimize_locations_along_wall(; do_cache=true, do_plot=false, save_plot
         (3, 6.2), (4, 6.2), (5, 6.2), (6.2, 5), (5, 1), (1, 2), (1.5, 9), (7, 9)]
     results_cid = string(hash((h, along_wall_locations)))
 
-    results = cached(distributed_scoring!, Dict{Tuple{Float64,Float64},Float64}(), along_wall_locations;
+    results::Dict{Tuple{Float64,Float64},Float64} = cached(distributed_scoring!, Dict{Tuple{Float64,Float64},Float64}(), along_wall_locations;
         h=h,
         F=F,
         u_shape=size(u_grid),
@@ -407,6 +407,58 @@ function optimize_locations_along_wall(; do_cache=true, do_plot=false, save_plot
         do_cache=do_cache,
         cid=results_cid
     )
+
+    # First heuristic: binary search
+    for i in 1:100
+        sorted_locations = sort(collect(results), by=x -> x[2], rev=true)
+        loc_1 = sorted_locations[1][1]
+        loc_2 = sorted_locations[2][1]
+        loc_new = ((loc_1[1] + loc_2[1]) / 2, (loc_1[2] + loc_2[2]) / 2)
+
+        # Prevent loc to be inside mask
+        if find_mask_val((Int(round(loc_new[1] / h)), Int(round(loc_new[2] / h))), h, mask) != 0
+            @info "New location $loc_new is inside a wall, skipping"
+            results[loc_new] = -1  # assign a very bad score to prevent future selection
+            continue
+        end
+
+        if haskey(results, loc_new)
+            break
+        end
+
+        # TODO: add multiple new locations around the midpoint to explore more of the space and mitigate noise in the measurements, e.g. by adding small random perturbations to loc_new or by adding points that are a fraction along the line between loc_1 and loc_2 instead of just the midpoint
+        # Also to make more use of the distributed scoring, we could collect a batch of new locations and score them in parallel instead of just one at a time, which would be more efficient and allow for more exploration of the space in each iteration
+
+        # Score the new location
+        new_results = Dict{Tuple{Float64,Float64},Float64}()
+        new_locations = [loc_new]
+        distributed_scoring!(new_results, new_locations;
+            h=h,
+            F=F,
+            u_shape=size(u_grid),
+            do_plot=do_plot,
+            save_plots=save_plots,
+            plot_output_dir=plot_output_dir
+        )
+
+        # Add new results to the main results dictionary
+        for (loc, measurement) in new_results
+            results[loc] = measurement
+        end
+    end
+
+    if do_cache
+        # Re-cache results with the new locations added, so that future runs can benefit from the additional data without needing to re-score those locations
+        filename = "distributed_scoring!_$results_cid.jld2"
+        cache_path = joinpath("cache", filename)
+        result = results
+        @save cache_path result
+        @info "Re-cached results with new locations added to $cache_path"
+    end
+
+
+    @info results
+    @info "Best location found: $(argmax(results)) with score $(maximum(values(results)))"
 
     return results
 end
