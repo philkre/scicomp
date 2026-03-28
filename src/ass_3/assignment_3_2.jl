@@ -267,16 +267,26 @@ function optimize_locations_along_wall(; do_plot=false, save_plots=false, plot_o
     along_wall_locations = [(2.8, 2), (2.8, 3), (2.8, 4), (2.8, 5), (2.8, 6),
         (3, 6.2), (4, 6.2), (5, 6.2), (6.2, 5), (5, 1), (1, 2), (1.5, 9), (7, 9)]
 
-    for loc in along_wall_locations
-        i, j = loc
-        f_field = create_F_field(i, j, h)
-        A = construct_matrix(u_grid, mask; k0=16.0, h=h)
-        b = build_rhs(f_field, h)
-        u_vec = A \ b
-        u = reshape(u_vec, size(u_grid))
-        measurement = check_signals(u, h)
-        println("at $loc found: $measurement")
-        build_FDM_wifi_plot(u)
+    # TODO: prompt for speedup options
+    # TODO: reuse previous solution for next solution
+    @showprogress for (idx, loc) in enumerate(along_wall_locations)
+        @time "Done optimizing for location $loc" begin
+            i, j = loc
+            @time "f_field" f_field = create_F_field(i, j, h)           # 0.02s
+            @time "build_rhs" b = build_rhs(f_field, h)                         # 0.01s
+            @time "A" A = construct_matrix(size(u_grid), mask; k0=16.0, h=h)
+            # back-substitution only, much faster than A \ b
+            @time "u_vec" u_vec = A \ b                                 # 1.05s
+            @time "reshape" u = reshape(u_vec, size(u_grid))                  # 0s
+            @time "measurement" measurement = check_signals(u, h)       # 0.00004s
+            println("at $loc found: $measurement")
+
+            if do_plot
+                @time "build_FDM_wifi_plot" begin
+                    build_FDM_wifi_plot(u; i=idx, do_save=save_plots, output_dir=plot_output_dir)      # 3.59s 1st plot, 0.1s subsequent plots
+                end
+            end
+        end
     end
 end
 
