@@ -113,14 +113,29 @@ function construct_matrix(size_u::Tuple{Int,Int}, mask::Matrix{Int64}; k0::Float
     ic = (rows + 1) / 2
     jc = (cols + 1) / 2
 
+    # Pre-compute coarse mask to avoid per-cell float arithmetic
+    coarse_mask = Matrix{Int}(undef, rows, cols)
+    for j in 1:cols, i in 1:rows
+        coarse_mask[i, j] = find_mask_val((i, j), h, mask)
+    end
+
+    # Pre-allocate: boundary cells contribute 2, interior up to 5
+    max_entries = 5 * N
+    I = Vector{Int}(undef, max_entries)
+    J = Vector{Int}(undef, max_entries)
+    V = Vector{ComplexF64}(undef, max_entries)
+    idx = 0
+
+    inv_h = 1 / h
+    impedance_diag = inv_h - im * k0
+
     for j in 1:cols
         for i in 1:rows
             p = i + (j - 1) * rows
-            cell_type = find_mask_val((i, j), h, mask)  # 0: air, 1: outer band, 2: inner wall
+            cell_type = coarse_mask[i, j]  # 0: air, 1: outer band, 2: inner wall
 
             if cell_type == 1
                 # -------- Absorbing outer band everywhere (impedance-like) --------
-                # pick one neighbour that is more "interior" (closer to centre)
                 best_score = Inf
                 ii = i
                 jj = j
@@ -128,7 +143,6 @@ function construct_matrix(size_u::Tuple{Int,Int}, mask::Matrix{Int64}; k0::Float
                     i2 = i + di
                     j2 = j + dj
                     if 1 <= i2 <= rows && 1 <= j2 <= cols
-                        # distance to centre
                         s = (i2 - ic)^2 + (j2 - jc)^2
                         if s < best_score
                             best_score = s
@@ -139,56 +153,56 @@ function construct_matrix(size_u::Tuple{Int,Int}, mask::Matrix{Int64}; k0::Float
 
                 q = ii + (jj - 1) * rows
 
-                # Impedance relation: (u_wall - u_int)/h - i*k0*u_wall = 0
-                # -> (1/h - i*k0) * u_wall - (1/h) * u_int = 0
-                push!(I, p)
-                push!(J, p)
-                push!(V, (1 / h - im * k0))
-                push!(I, p)
-                push!(J, q)
-                push!(V, -1 / h)
-
+                idx += 1
+                I[idx] = p
+                J[idx] = p
+                V[idx] = impedance_diag
+                idx += 1
+                I[idx] = p
+                J[idx] = q
+                V[idx] = -inv_h
 
             else
                 # -------- Interior (air or inner walls) → standard Helmholtz --------
-
                 n_local = (cell_type == 0) ? n_air : n_wall
                 k_local = n_local * k0
 
-                # centre
-                push!(I, p)
-                push!(J, p)
-                push!(V, (k_local^2 * h^2 - 4))
+                idx += 1
+                I[idx] = p
+                J[idx] = p
+                V[idx] = k_local^2 * h^2 - 4
 
-                # neighbours (no periodic wrap)
                 if i > 1
-                    north_idx = p - 1
-                    push!(I, p)
-                    push!(J, north_idx)
-                    push!(V, 1.0 + 0.0im)
+                    idx += 1
+                    I[idx] = p
+                    J[idx] = p - 1
+                    V[idx] = 1.0 + 0.0im
                 end
                 if i < rows
-                    south_idx = p + 1
-                    push!(I, p)
-                    push!(J, south_idx)
-                    push!(V, 1.0 + 0.0im)
+                    idx += 1
+                    I[idx] = p
+                    J[idx] = p + 1
+                    V[idx] = 1.0 + 0.0im
                 end
                 if j > 1
-                    west_idx = p - rows
-                    push!(I, p)
-                    push!(J, west_idx)
-                    push!(V, 1.0 + 0.0im)
+                    idx += 1
+                    I[idx] = p
+                    J[idx] = p - rows
+                    V[idx] = 1.0 + 0.0im
                 end
                 if j < cols
-                    east_idx = p + rows
-                    push!(I, p)
-                    push!(J, east_idx)
-                    push!(V, 1.0 + 0.0im)
+                    idx += 1
+                    I[idx] = p
+                    J[idx] = p + rows
+                    V[idx] = 1.0 + 0.0im
                 end
             end
         end
     end
 
+    resize!(I, idx)
+    resize!(J, idx)
+    resize!(V, idx)
     return sparse(I, J, V, N, N)
 end
 
@@ -289,12 +303,12 @@ function optimize_locations_along_wall(; do_plot=false, save_plots=false, plot_o
     @showprogress for (idx, loc) in enumerate(along_wall_locations)
         @time "Done optimizing for location $loc" begin
             x_i, y_i = loc
-            @time "f_field" f_field = create_F_field(x_i, y_i, h)           # 0.02s
-            @time "build_rhs" b = build_rhs(f_field, h)                 # 0.01s
+            @time "f_field" f_field = create_F_field(x_i, y_i, h)       # 0.02s -> # 0.001s
+            @time "build_rhs" b = build_rhs(f_field, h)                 # 0.01s -> # 0.0009s
             # back-substitution only, much faster than A \ b
-            @time "u_vec" u_vec = F \ b                                 # 1.05s
-            @time "reshape" u = reshape(u_vec, size(u_grid))            # 0s
-            @time "measurement" measurement = check_signals(u, h)       # 0.00004s
+            @time "u_vec" u_vec = F \ b                                 # 1.05s -> # 0.07s
+            @time "reshape" u = reshape(u_vec, size(u_grid))            # 0s -> # 0s
+            @time "measurement" measurement = check_signals(u, h)       # 0.00004s -> # 0.00001s
             println("at $loc found: $measurement")
 
             if do_plot
