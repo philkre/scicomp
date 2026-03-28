@@ -1,12 +1,12 @@
 module Assignment_3_2
 
-using BenchmarkTools
+using SparseArrays: sparse, SparseMatrixCSC, lu
+using Statistics: mean
+using ProgressMeter: @showprogress
 using Plots
-using SparseArrays
-using BenchmarkTools
 
 # Import local module
-# using Helpers
+using Helpers.SaveFig: savefig_auto_folder
 
 
 DEFAULT_PLOT_OUTPUT_DIR = "plots/ass_3"
@@ -84,11 +84,11 @@ function find_mask_val(index, h_grid, mask; h_mask=0.005)
 end
 
 
-function construct_matrix(u_grid::Matrix{Float64}, mask; k0::Float64=50.0, h::Float64)
+function construct_matrix(size_u::Tuple{Int,Int}, mask::Matrix{Int64}; k0::Float64=50.0, h::Float64)::SparseMatrixCSC{ComplexF64,Int64}
     I = Int[]
     J = Int[]
     V = ComplexF64[]
-    rows, cols = size(u_grid)
+    rows, cols = size_u
     N = rows * cols
 
     n_air = 1.0 + 0.0im
@@ -199,13 +199,19 @@ function set_axes_wifi_plot(fig)
     return
 end
 
-function build_FDM_wifi_plot(u)
+function build_FDM_wifi_plot(u; i::Union{Int,Nothing}=nothing, do_save::Bool=false, output_dir::String=DEFAULT_PLOT_OUTPUT_DIR)
     U = abs.(u)
     U ./= maximum(U)              # normalize 0..1
     U_dB = 20 .* log10.(U .+ 1e-12)  # avoid log10(0)
     p = heatmap(U_dB; clims=(-60, 0))   # dB scale like the assignment
     set_axes_wifi_plot(p)
-    display(p)
+
+    if do_save
+        output_path = savefig_auto_folder(p, joinpath(output_dir, "wifi_heatmap_$(i).png"))
+        println("Saved heatmap to $output_path")
+    else
+        display(p)
+    end
     return
 end
 
@@ -251,7 +257,7 @@ function circular_mean(A, center::Tuple{Int,Int}, radius::Real)
 end
 
 
-function optimize_locations_along_wall()
+function optimize_locations_along_wall(; do_plot=false, save_plots=false, plot_output_dir::String=DEFAULT_PLOT_OUTPUT_DIR)
     h = 0.01
     u_grid = zeros(Float64, Int(8 / h), Int(10 / h))
 
@@ -287,7 +293,7 @@ function main(;
     end
 
     @time "Done optimizing locations along wall" begin
-        optimize_locations_along_wall()
+        optimize_locations_along_wall(; do_plot=true, save_plots=true, plot_output_dir=plot_output_dir)
     end
 
     return
