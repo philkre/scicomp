@@ -123,7 +123,7 @@ function main(; n_steps::Int=30_000, plot_every::Int=25, plot_mode::String="velo
     #
     #  Each element of `c` is a (cx, cy) tuple for direction i.
 
-    const c = Tuple{Int,Int}[
+    c = Tuple{Int,Int}[
         (0, 0),   # 1  — rest
         (1, 0),   # 2  — east
         (0, 1),   # 3  — north
@@ -136,37 +136,37 @@ function main(; n_steps::Int=30_000, plot_every::Int=25, plot_mode::String="velo
     ]
 
     # Lattice weights (from the D2Q9 equilibrium derivation)
-    const w = Float64[4/9,                       # rest
+    w = Float64[4/9,                       # rest
         1/9, 1/9, 1/9, 1/9,     # axis-aligned
         1/36, 1/36, 1/36, 1/36]    # diagonals
 
     # Opposite direction index for each i (used in bounce-back)
     # e.g. opposite of 2 (east) is 4 (west)
-    const opp = Int[1, 4, 5, 2, 3, 8, 9, 6, 7]
+    opp = Int[1, 4, 5, 2, 3, 8, 9, 6, 7]
 
     # =============================================================================
     # 2.  Simulation Parameters
     # =============================================================================
 
-    const Nx = 300        # domain length  (lattice units)
-    const Ny = 120        # domain height  (lattice units)
+    Nx = 300        # domain length  (lattice units)
+    Ny = 120        # domain height  (lattice units)
 
     # Cylinder geometry
-    const cx_cyl = Nx ÷ 5   # cylinder centre x  (1/5 from inlet)
-    const cy_cyl = Ny ÷ 2   # cylinder centre y  (centred vertically)
-    const r_cyl = 8         # cylinder radius
+    cx_cyl = Nx ÷ 5   # cylinder centre x  (1/5 from inlet)
+    cy_cyl = Ny ÷ 2   # cylinder centre y  (centred vertically)
+    r_cyl = 8         # cylinder radius
 
     # Flow parameters
-    const U_inlet = 0.12     # inlet velocity (lattice units, keep ≪ 1 for low Mach)
-    const Re = 150      # target Reynolds number
+    U_inlet = 0.12     # inlet velocity (lattice units, keep ≪ 1 for low Mach)
+    Re = 150      # target Reynolds number
 
     # Derived quantities:
     #   Re = U * D / nu   →  nu = U * D / Re
     #   In LBM:  nu = cs² * (tau - 0.5)  where cs² = 1/3
     #   Therefore:  tau = 3 * nu + 0.5
-    const D = 2 * r_cyl                    # cylinder diameter
-    const nu = U_inlet * D / Re             # kinematic viscosity
-    const tau = 3.0 * nu + 0.5              # BGK relaxation time
+    D = 2 * r_cyl                    # cylinder diameter
+    nu = U_inlet * D / Re             # kinematic viscosity
+    tau = 3.0 * nu + 0.5              # BGK relaxation time
 
     println("Simulation parameters:")
     println("  Grid:      $(Nx) × $(Ny)")
@@ -178,11 +178,11 @@ function main(; n_steps::Int=30_000, plot_every::Int=25, plot_mode::String="velo
     # =============================================================================
 
     # Coordinate grids (0-based to match physical centring)
-    const _X = Float64[x for x in 0:Nx-1, _ in 0:Ny-1]   # shape (Nx, Ny)
-    const _Y = Float64[y for _ in 0:Nx-1, y in 0:Ny-1]   # shape (Nx, Ny)
+    _X = Float64[x for x in 0:Nx-1, _ in 0:Ny-1]   # shape (Nx, Ny)
+    _Y = Float64[y for _ in 0:Nx-1, y in 0:Ny-1]   # shape (Nx, Ny)
 
     # Boolean matrix: true where the obstacle is located
-    const obstacle = @. (_X - cx_cyl)^2 + (_Y - cy_cyl)^2 <= r_cyl^2
+    obstacle = @. (_X - cx_cyl)^2 + (_Y - cy_cyl)^2 <= r_cyl^2
 
     # -----------------------------------------------------------------
     # 5a. Initialisation
@@ -304,6 +304,7 @@ function main(;
     do_bench::Bool=false,
     do_cache::Bool=false,
     plot_output_dir::String=DEFAULT_PLOT_OUTPUT_DIR,
+    do_gif::Bool=false,
 )
     if do_bench
         @time "Done benchmarking" begin
@@ -312,6 +313,9 @@ function main(;
     end
 
     # TODO
+    if do_gif
+        println("OBAMA GIF MADE")
+    end
 
     return
 end
