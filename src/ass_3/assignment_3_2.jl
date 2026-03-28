@@ -1,16 +1,48 @@
 module Assignment_3_2
 
-using SparseArrays: sparse, SparseMatrixCSC, lu
+using SparseArrays: sparse, SparseMatrixCSC, lu, UMFPACK.UmfpackLU
+using LoopVectorization: @turbo
+using Distributed
 using Statistics: mean
-using ProgressMeter: @showprogress
+using ProgressMeter: Progress, next!
 using Plots
-using LoopVectorization
+using JLD2
 
 # Import local module
 using Helpers.SaveFig: savefig_auto_folder
 
 
 DEFAULT_PLOT_OUTPUT_DIR = "plots/ass_3"
+
+
+function cached(f, args...; cache_dir="cache", quiet=false, do_cache=true, cid::Union{Nothing,String}=nothing, kwargs...)
+    if !do_cache
+        return f(args...; kwargs...)
+    end
+
+    # Create a unique filename based on the function name and arguments
+    id = isnothing(cid) ? hash((args, kwargs)) : cid
+    filename = "$(string(f))_$id.jld2"
+    cache_path = joinpath(cache_dir, filename)
+
+    # Check if the result is already cached
+    if isfile(cache_path)
+        if !quiet
+            println("Loading cached result from $cache_path")
+        end
+        return load(cache_path, "result")
+    end
+
+    # If not cached, compute the result and save it
+    result = f(args...; kwargs...)
+    mkpath(cache_dir)  # Ensure cache directory exists
+    @save cache_path result
+    if !quiet
+        println("Saved result to cache at $cache_path")
+    end
+    return result
+end
+
 
 
 """Wave number"""
@@ -286,38 +318,97 @@ function circular_mean(A, center::Tuple{Int,Int}, radius::Real)
 end
 
 
-function optimize_locations_along_wall(; do_plot=false, save_plots=false, plot_output_dir::String=DEFAULT_PLOT_OUTPUT_DIR)
+
+function distributed_scoring!(
+    result_dict::Dict{Tuple{Float64,Float64},Float64},
+    locations::Vector{Tuple{Float64,Float64}};
+    h::Float64=0.01,
+    F::UmfpackLU{ComplexF64,Int64},
+    u_shape::Tuple{Int,Int}=(Int(8 / h), Int(10 / h)),
+    do_plot=false,
+    save_plots=false,
+    plot_output_dir::String=DEFAULT_PLOT_OUTPUT_DIR
+)
+
+    # Initialize progress bar 
+    n = length(locations)
+    prog = Progress(n, 1, "Scoring locations...")
+    # Create a RemoteChannel to track progress across distributed workers
+    ch = RemoteChannel(() -> Channel{Int}(n))  # buffer n updates
+    # RemoteChannel to collect results back on master
+    results_ch = RemoteChannel(() -> Channel{Tuple{Tuple{Float64,Float64},Float64}}(n))
+
+    # consumer task on master that updates the progress bar
+    t = @async begin
+        for _ in 1:n
+            take!(ch)
+            next!(prog)
+        end
+    end
+
+    @sync @distributed for (idx, loc) in [enumerate(locations)...]
+        x_i, y_i = loc
+        f_field = create_F_field(x_i, y_i, h)       # 0.02s -> # 0.001s
+        b = build_rhs(f_field, h)                   # 0.01s -> # 0.0009s
+        # back-substitution only, much faster than A \ b
+        u_vec = F \ b                               # 1.05s -> # 0.07s
+        u = reshape(u_vec, u_shape)                 # 0s -> # 0s
+        measurement = check_signals(u, h)           # 0.00004s -> # 0.00001s
+
+        put!(results_ch, (loc, measurement))
+
+        if do_plot
+            @time "build_FDM_wifi_plot" begin
+                build_FDM_wifi_plot(u; i=idx, do_save=save_plots, output_dir=plot_output_dir)      # 3.59s 1st plot, 0.1s subsequent plots
+            end
+        end
+
+        put!(ch, 1)
+    end
+
+    wait(t) # ensure progress bar finishes after all workers are done
+
+    # Collect results from the channel
+    for _ in 1:n
+        loc, measurement = take!(results_ch)
+        result_dict[loc] = measurement
+    end
+
+    return result_dict
+end
+
+
+function optimize_locations_along_wall(; do_cache=true, do_plot=false, save_plots=false, plot_output_dir::String=DEFAULT_PLOT_OUTPUT_DIR)
     h = 0.01
     u_grid = zeros(Float64, Int(8 / h), Int(10 / h))
 
+    # Hash arguments ahead of time to prevent hashing overhead during the first call to cached(lu, A)
+    cache_id = string(hash((h)))
+
     #create mask, will be reused by all runs
-    mask = Matrix(generate_walls_mask()')
+    # Matrix(generate_walls_mask()')
+    @time "Constructed mask" mask = Matrix(generate_walls_mask()')
 
     # Build and factorize matrix ONCE (A depends only on geometry, not source location)
-    @time "A (once)" A = construct_matrix(size(u_grid), mask; k0=16.0, h=h)
-    @time "LU factorize (once)" F = lu(A)
+    @time "Constructed A" A = construct_matrix(size(u_grid), mask; k0=16.0, h=h)
+    @time "LU factorized A" F = cached(lu, A; do_cache=do_cache, cid=cache_id)
 
-    along_wall_locations = [(2.8, 2), (2.8, 3), (2.8, 4), (2.8, 5), (2.8, 6),
+    along_wall_locations::Vector{Tuple{Float64,Float64}} = [(2.8, 2), (2.8, 3), (2.8, 4), (2.8, 5), (2.8, 6),
         (3, 6.2), (4, 6.2), (5, 6.2), (6.2, 5), (5, 1), (1, 2), (1.5, 9), (7, 9)]
+    results_cid = string(hash((h, along_wall_locations)))
 
-    @showprogress for (idx, loc) in enumerate(along_wall_locations)
-        @time "Done optimizing for location $loc" begin
-            x_i, y_i = loc
-            f_field = create_F_field(x_i, y_i, h)       # 0.02s -> # 0.001s
-            b = build_rhs(f_field, h)                 # 0.01s -> # 0.0009s
-            # back-substitution only, much faster than A \ b
-            u_vec = F \ b                                 # 1.05s -> # 0.07s
-            u = reshape(u_vec, size(u_grid))            # 0s -> # 0s
-            measurement = check_signals(u, h)       # 0.00004s -> # 0.00001s
-            println("at $loc found: $measurement")
+    results = cached(distributed_scoring!, Dict{Tuple{Float64,Float64},Float64}(), along_wall_locations;
+        h=h,
+        F=F,
+        u_shape=size(u_grid),
+        do_plot=do_plot,
+        save_plots=save_plots,
+        plot_output_dir=plot_output_dir,
+        do_cache=do_cache,
+        cid=results_cid
+    )
 
-            if do_plot
-                @time "build_FDM_wifi_plot" begin
-                    build_FDM_wifi_plot(u; i=idx, do_save=save_plots, output_dir=plot_output_dir)      # 3.59s 1st plot, 0.1s subsequent plots
-                end
-            end
-        end
-    end
+    return results
 end
 
 
@@ -333,7 +424,7 @@ function main(;
     end
 
     @time "Done optimizing locations along wall" begin
-        optimize_locations_along_wall(; do_plot=false, save_plots=true, plot_output_dir=plot_output_dir)
+        optimize_locations_along_wall(; do_cache=do_cache, do_plot=false, save_plots=true, plot_output_dir=plot_output_dir)
     end
 
     return
