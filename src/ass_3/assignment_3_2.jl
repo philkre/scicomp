@@ -4,6 +4,7 @@ using SparseArrays: sparse, SparseMatrixCSC, lu
 using Statistics: mean
 using ProgressMeter: @showprogress
 using Plots
+using LoopVectorization
 
 # Import local module
 using Helpers.SaveFig: savefig_auto_folder
@@ -26,9 +27,23 @@ k(freq) = (2 * π * freq) / (3 * 10^8)
     return (neighbors - f_grid[i,j] * h^2) / (4 - k^2 * h^2)
 end
 """
+
+
+"""
+    function create_F_field(x_r, y_r, stepsize; A=10^4, sigma=0.2)
+"""
 function create_F_field(x_r, y_r, stepsize; A=10^4, sigma=0.2)
-    foo(x, y) = A * exp(-(((x - x_r)^2 + (y - y_r)^2) / (2 * sigma^2)))
-    return [foo(x, y) for x in 0:stepsize:8-stepsize, y in 0:stepsize:10-stepsize]
+    rows = Int(8 / stepsize)
+    cols = Int(10 / stepsize)
+    F_field = Matrix{Float64}(undef, rows, cols)
+
+    inv_2sigma2 = 1 / (2 * sigma^2)
+    @turbo for j in 1:cols, i in 1:rows
+        y = (j - 1) * stepsize
+        x = (i - 1) * stepsize
+        F_field[i, j] = A * exp(-((x - x_r)^2 + (y - y_r)^2) * inv_2sigma2)
+    end
+    return F_field
 end
 
 
@@ -264,20 +279,21 @@ function optimize_locations_along_wall(; do_plot=false, save_plots=false, plot_o
     #create mask, will be reused by all runs
     mask = Matrix(generate_walls_mask()')
 
+    # Build and factorize matrix ONCE (A depends only on geometry, not source location)
+    @time "A (once)" A = construct_matrix(size(u_grid), mask; k0=16.0, h=h)
+    @time "LU factorize (once)" F = lu(A)
+
     along_wall_locations = [(2.8, 2), (2.8, 3), (2.8, 4), (2.8, 5), (2.8, 6),
         (3, 6.2), (4, 6.2), (5, 6.2), (6.2, 5), (5, 1), (1, 2), (1.5, 9), (7, 9)]
 
-    # TODO: prompt for speedup options
-    # TODO: reuse previous solution for next solution
     @showprogress for (idx, loc) in enumerate(along_wall_locations)
         @time "Done optimizing for location $loc" begin
-            i, j = loc
-            @time "f_field" f_field = create_F_field(i, j, h)           # 0.02s
-            @time "build_rhs" b = build_rhs(f_field, h)                         # 0.01s
-            @time "A" A = construct_matrix(size(u_grid), mask; k0=16.0, h=h)
+            x_i, y_i = loc
+            @time "f_field" f_field = create_F_field(x_i, y_i, h)           # 0.02s
+            @time "build_rhs" b = build_rhs(f_field, h)                 # 0.01s
             # back-substitution only, much faster than A \ b
-            @time "u_vec" u_vec = A \ b                                 # 1.05s
-            @time "reshape" u = reshape(u_vec, size(u_grid))                  # 0s
+            @time "u_vec" u_vec = F \ b                                 # 1.05s
+            @time "reshape" u = reshape(u_vec, size(u_grid))            # 0s
             @time "measurement" measurement = check_signals(u, h)       # 0.00004s
             println("at $loc found: $measurement")
 
