@@ -1,5 +1,4 @@
-# General global helpers, mostly for assigments 2 & 3
-
+# General global helpers, mostly for assigments 1 & 2
 module Helpers
 
 include("bench_funcs.jl")

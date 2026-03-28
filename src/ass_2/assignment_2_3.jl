@@ -56,7 +56,7 @@ function main(; do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, 
         )
     end
     # Plot final state
-    filename_final_state = joinpath(plot_output_dir, "gray_scott_final_spots.png" )
+    filename_final_state = joinpath(plot_output_dir, "gray_scott_final_spots.png")
     p_final = plot_gray_scott_state(u_hist[end], v_hist[end], t_hist[end]; L=L, title_prefix="Gray-Scott (spots) (f=$(@sprintf("%.4f", f)), k=$(@sprintf("%.4f", k)))")
     savefig_auto_folder(p_final, filename_final_state)
     @info "Final state (spots pattern) saved to: $(filename_final_state)"
@@ -143,13 +143,13 @@ function main(; do_bench::Bool=false, do_gif::Bool=false, do_cache::Bool=false, 
     concentration_arr_1 = [mean(v) for v in v_hist]
     concentration_arr_2 = [mean(v) for v in v_hist2]
     concentration_arr_3 = [mean(v) for v in v_hist3]
-    time = [i*10 for i in 1:length(concentration_arr_1)]
+    time = [i * 10 for i in 1:length(concentration_arr_1)]
 
     xaxis!("Time")
     yaxis!("v concentration (average)")
-    plot!(time, concentration_arr_1, label= @sprintf("(f=%.4f, k=%.4f)", f, k))
-    plot!(time, concentration_arr_2, label= @sprintf("(f=%.4f, k=%.4f)", f2, k2))
-    plot!(time, concentration_arr_3, label= @sprintf("(f=%.4f, k=%.4f)", f3, k3))
+    plot!(time, concentration_arr_1, label=@sprintf("(f=%.4f, k=%.4f)", f, k))
+    plot!(time, concentration_arr_2, label=@sprintf("(f=%.4f, k=%.4f)", f2, k2))
+    plot!(time, concentration_arr_3, label=@sprintf("(f=%.4f, k=%.4f)", f3, k3))
     savefig_auto_folder(concentration_plot, filename_concentration)
 
 

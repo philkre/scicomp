@@ -4,8 +4,7 @@ Pkg.activate(@__DIR__)
 using ArgParse
 using Distributed: @everywhere
 
-include("src/helpers/__init__.jl")
-using .Helpers.DistributedUtil: set_procs, maximize_workers
+using Helpers.DistributedUtil: set_procs, maximize_workers
 
 # Globals
 "Do benchmarking (default behavior)"
@@ -107,12 +106,10 @@ if ((abspath(PROGRAM_FILE) == @__FILE__) || !isempty(PROGRAM_FILE)) && !isintera
     end
 
     # Add workers for distributed computing
-    @time "Added workers" begin
-        if (nprocs === nothing)
-            maximize_workers()
-        else
-            set_procs(nprocs)
-        end
+    if (nprocs === nothing)
+        @time "Added workers" maximize_workers()
+    elseif (nprocs > 1)
+        @time "Added workers" set_procs(nprocs)
     end
 
     # Assignment 3.1

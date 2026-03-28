@@ -3,7 +3,7 @@ module Assignment_3_1
 using BenchmarkTools
 
 # Import local module (general helpers)
-include("../helpers/__init__.jl")
+# using Helpers
 
 
 DEFAULT_PLOT_OUTPUT_DIR = "plots/ass_3"

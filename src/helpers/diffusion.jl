@@ -1,7 +1,7 @@
 module Diffusion
 
 using Distributed
-@everywhere using LoopVectorization: @turbo
+using LoopVectorization: @turbo
 using SpecialFunctions: erfc
 using Metal: MtlMatrix, MtlDeviceMatrix, @metal, PrivateStorage, thread_position_in_grid_2d
 using CUDA

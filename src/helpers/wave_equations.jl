@@ -1,8 +1,8 @@
 module WaveEquations
 
 using Distributed
-@everywhere using SharedArrays
-@everywhere using LoopVectorization
+using SharedArrays
+using LoopVectorization
 
 """
     wave_equation(psi::Vector{Float64}, c::Float64, L::Float64, N::Int)::Vector{Float64}

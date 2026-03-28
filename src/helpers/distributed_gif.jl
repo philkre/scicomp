@@ -3,10 +3,8 @@ module DistributedGIF
 using Distributed
 using Printf: @sprintf
 using ProgressMeter
-@everywhere using Plots
-@everywhere begin
-    ENV["GKSwstype"] = "nul"  # Headless mode - no display
-end
+using Plots
+ENV["GKSwstype"] = "nul"  # Headless mode - no display
 using FFMPEG
 
 include("savefig.jl")
