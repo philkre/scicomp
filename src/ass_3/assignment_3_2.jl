@@ -380,7 +380,9 @@ end
 
 function optimize_locations_along_wall(; do_cache=true, do_plot=false, save_plots=false, plot_output_dir::String=DEFAULT_PLOT_OUTPUT_DIR)
     h = 0.01
-    u_grid = zeros(Float64, Int(8 / h), Int(10 / h))
+    width = 10.0
+    height = 8.0
+    u_grid = zeros(Float64, Int(height / h), Int(width / h))
 
     # Hash arguments ahead of time to prevent hashing overhead during the first call to cached(lu, A)
     cache_id = string(hash((h)))
@@ -415,24 +417,46 @@ function optimize_locations_along_wall(; do_cache=true, do_plot=false, save_plot
         loc_2 = sorted_locations[2][1]
         loc_new = ((loc_1[1] + loc_2[1]) / 2, (loc_1[2] + loc_2[2]) / 2)
 
-        # Prevent loc to be inside mask
-        if find_mask_val((Int(round(loc_new[1] / h)), Int(round(loc_new[2] / h))), h, mask) != 0
-            @info "New location $loc_new is inside a wall, skipping"
-            results[loc_new] = -1  # assign a very bad score to prevent future selection
-            continue
-        end
+        # Also add some new locations around the midpoint to explore more of the space and mitigate noise in the measurements, e.g. by adding small random perturbations to loc_new or by adding points that are a fraction along the line between loc_1 and loc_2 instead of just the midpoint
+        # For example, we could add points that are 25% and 75% along
+        loc_new_25 = ((loc_1[1] + 3 * loc_2[1]) / 4, (loc_1[2] + 3 * loc_2[2]) / 4)
+        loc_new_75 = ((3 * loc_1[1] + loc_2[1]) / 4, (3 * loc_1[2] + loc_2[2]) / 4)
 
-        if haskey(results, loc_new)
-            break
-        end
+        # Add random locations for more exploration
+        rand_offset = 0.1  # max random offset in meters
+        loc_rand_near = () -> (loc_new[1] + (rand() - 0.5) * rand_offset, loc_new[2] + (rand() - 0.5) * rand_offset)
+        loc_new_rand1 = loc_rand_near()
+        loc_new_rand2 = loc_rand_near()
+        loc_new_rand3 = loc_rand_near()
+        loc_new_rand4 = loc_rand_near()
 
-        # TODO: add multiple new locations around the midpoint to explore more of the space and mitigate noise in the measurements, e.g. by adding small random perturbations to loc_new or by adding points that are a fraction along the line between loc_1 and loc_2 instead of just the midpoint
-        # Also to make more use of the distributed scoring, we could collect a batch of new locations and score them in parallel instead of just one at a time, which would be more efficient and allow for more exploration of the space in each iteration
+        # Add random locations in entire space
+        loc_rand_global = () -> (rand() * 10, rand() * 8)
+        loc_new_rand_global1 = loc_rand_global()
+        loc_new_rand_global2 = loc_rand_global()
+        loc_new_rand_global3 = loc_rand_global()
+        loc_new_rand_global4 = loc_rand_global()
+
+        loc_new_arr = filter((loc) -> begin
+                # Prevent loc from being outside the domain
+                if loc[1] < 0 || loc[1] > width || loc[2] < 0 || loc[2] > height
+                    @info "New location $loc is outside the domain, skipping"
+                    return false
+                end
+
+                # Prevent loc to be inside mask
+                if find_mask_val((Int(round(loc[1] / h)), Int(round(loc[2] / h))), h, mask) != 0
+                    @info "New location $loc is inside a wall, skipping"
+                    results[loc] = -1  # assign a very bad score to prevent future selection
+                    return false
+                end
+
+                return true
+            end, [loc_new, loc_new_25, loc_new_75, loc_new_rand1, loc_new_rand2, loc_new_rand3, loc_new_rand4, loc_new_rand_global1, loc_new_rand_global2, loc_new_rand_global3, loc_new_rand_global4])
 
         # Score the new location
         new_results = Dict{Tuple{Float64,Float64},Float64}()
-        new_locations = [loc_new]
-        distributed_scoring!(new_results, new_locations;
+        distributed_scoring!(new_results, loc_new_arr;
             h=h,
             F=F,
             u_shape=size(u_grid),
@@ -440,6 +464,8 @@ function optimize_locations_along_wall(; do_cache=true, do_plot=false, save_plot
             save_plots=save_plots,
             plot_output_dir=plot_output_dir
         )
+
+        println(i)
 
         # Add new results to the main results dictionary
         for (loc, measurement) in new_results
