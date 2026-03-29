@@ -13,7 +13,7 @@ using Helpers.SaveFig: savefig_auto_folder
 
 
 DEFAULT_PLOT_OUTPUT_DIR = "plots/ass_3"
-
+measurement_locations = Tuple{Int,Int}[(5, 1), (1, 2), (1, 9), (7, 9)]
 
 function cached(f, args...; cache_dir="cache", quiet=false, do_cache=true, cid::Union{Nothing,String}=nothing, kwargs...)
     if !do_cache
@@ -260,15 +260,26 @@ function set_axes_wifi_plot(fig)
     return
 end
 
-function build_FDM_wifi_plot(u; i::Union{Int,Nothing}=nothing, do_save::Bool=false, output_dir::String=DEFAULT_PLOT_OUTPUT_DIR)
+function build_FDM_wifi_plot(u; i::Union{Int,Nothing}=nothing,
+    score::Union{Float64,Nothing}=nothing,
+    do_save::Bool=false, output_dir::String=DEFAULT_PLOT_OUTPUT_DIR)
     U = abs.(u)
     U ./= maximum(U)              # normalize 0..1
     U_dB = 20 .* log10.(U .+ 1e-12)  # avoid log10(0)
     p = heatmap(U_dB; clims=(-60, 0))   # dB scale like the assignment
     set_axes_wifi_plot(p)
 
+    # Set title
+    if !isnothing(i)
+        title!(p, "Heatmap of signal strength (dB) for location $i")
+    elseif !isnothing(score)
+        title!(p, "Heatmap of signal strength (dB) with score $(round(score, digits=2))")
+    else
+        title!(p, "Heatmap of signal strength (dB)")
+    end
+
     if do_save
-        output_path = savefig_auto_folder(p, joinpath(output_dir, "wifi_heatmap_$(i).png"))
+        output_path = savefig_auto_folder(p, joinpath(output_dir, "wifi_heatmap_$(i)_$(score).png"))
         println("Saved heatmap to $output_path")
     else
         display(p)
@@ -276,10 +287,7 @@ function build_FDM_wifi_plot(u; i::Union{Int,Nothing}=nothing, do_save::Bool=fal
     return
 end
 
-function check_signals(u_matrix, h)
-    #measurement locations
-    locations = Tuple{Int,Int}[(5, 1), (1, 2), (1, 9), (7, 9)]
-
+function check_signals(u_matrix, h; locations=measurement_locations)
     scalar = 1 / h
     radius = 0.05 / h
     if radius < 1
@@ -317,7 +325,15 @@ function circular_mean(A, center::Tuple{Int,Int}, radius::Real)
     return mean(vals)
 end
 
-
+function solve_for_u(loc::Tuple{Float64,Float64}, F::UmfpackLU{ComplexF64,Int64}, u_shape::Tuple{Int,Int}, h::Float64)
+    x_i, y_i = loc
+    f_field = create_F_field(x_i, y_i, h)       # 0.02s -> # 0.001s
+    b = build_rhs(f_field, h)                   # 0.01s -> # 0.0009s
+    # back-substitution only, much faster than A \ b
+    u_vec = F \ b                               # 1.05s -> # 0.07s
+    u = reshape(u_vec, u_shape)
+    return u
+end
 
 function distributed_scoring!(
     result_dict::Dict{Tuple{Float64,Float64},Float64},
@@ -347,12 +363,7 @@ function distributed_scoring!(
     end
 
     @sync @distributed for (idx, loc) in [enumerate(locations)...]
-        x_i, y_i = loc
-        f_field = create_F_field(x_i, y_i, h)       # 0.02s -> # 0.001s
-        b = build_rhs(f_field, h)                   # 0.01s -> # 0.0009s
-        # back-substitution only, much faster than A \ b
-        u_vec = F \ b                               # 1.05s -> # 0.07s
-        u = reshape(u_vec, u_shape)                 # 0s -> # 0s
+        u = solve_for_u(loc, F, u_shape, h)  # 1.08s -> # 0.08s
         measurement = check_signals(u, h)           # 0.00004s -> # 0.00001s
 
         put!(results_ch, (loc, measurement))
@@ -378,6 +389,31 @@ function distributed_scoring!(
 end
 
 
+function valid_point_filter(point::Tuple{Float64,Float64}, mask::Matrix{Int}; width::Float64=10.0, height::Float64=8.0, h::Float64=0.01)::Bool
+    x, y = point
+
+    # Prevent loc from being outside the domain
+    if x < 0 || x > width || y < 0 || y > height
+        return false
+    end
+
+    # Prevent loc to be inside mask
+    if find_mask_val((Int(round(x / h)), Int(round(y / h))), h, mask) != 0
+        return false
+    end
+
+    # Prevent 0.5 m radius around measurement locations (5, 1), (1, 2), (1, 9), (7, 9)
+    for meas_loc in measurement_locations
+        if (x - meas_loc[1])^2 + (y - meas_loc[2])^2 < 0.5^2
+            return false
+        end
+    end
+
+    return true
+end
+
+
+
 function optimize_locations_along_wall(; do_cache=true, do_plot=false, save_plots=false, plot_output_dir::String=DEFAULT_PLOT_OUTPUT_DIR)
     h = 0.01
     width = 10.0
@@ -395,11 +431,20 @@ function optimize_locations_along_wall(; do_cache=true, do_plot=false, save_plot
     @time "Constructed A" A = construct_matrix(size(u_grid), mask; k0=16.0, h=h)
     @time "LU factorized A" F = cached(lu, A; do_cache=do_cache, cid=cache_id)
 
+    # Define initial measurement locations along the walls and a grid of points, and filter them to ensure they are valid (not inside walls or too close to measurement locations)
+    valid_point_filter_closure = (p) -> valid_point_filter(p, mask; width=width, height=height, h=h)
     along_wall_locations::Vector{Tuple{Float64,Float64}} = [(2.8, 2), (2.8, 3), (2.8, 4), (2.8, 5), (2.8, 6),
         (3, 6.2), (4, 6.2), (5, 6.2), (6.2, 5), (5, 1), (1, 2), (1.5, 9), (7, 9)]
-    results_cid = string(hash((h, along_wall_locations)))
 
-    results::Dict{Tuple{Float64,Float64},Float64} = cached(distributed_scoring!, Dict{Tuple{Float64,Float64},Float64}(), along_wall_locations;
+    # Add grid of points with dx = lambda/2 (5Ghz -> ~6 cm)
+    dx = 0.06
+    grid_points = [(x, y) for x in 0:dx:width, y in 0:dx:height]
+    stage_1_points = filter(valid_point_filter_closure, [grid_points..., along_wall_locations...])
+    results_cid = string(hash((h, stage_1_points)))
+
+    @info "Scoring $(length(stage_1_points)) locations in stage 1 grid scoring..."
+    # Stage 1: Initial grid scoring
+    results::Dict{Tuple{Float64,Float64},Float64} = cached(distributed_scoring!, Dict{Tuple{Float64,Float64},Float64}(), stage_1_points;
         h=h,
         F=F,
         u_shape=size(u_grid),
@@ -411,7 +456,7 @@ function optimize_locations_along_wall(; do_cache=true, do_plot=false, save_plot
     )
 
     # First heuristic: binary search
-    for i in 1:100
+    for i in 1:10
         sorted_locations = sort(collect(results), by=x -> x[2], rev=true)
         loc_1 = sorted_locations[1][1]
         loc_2 = sorted_locations[2][1]
@@ -437,24 +482,10 @@ function optimize_locations_along_wall(; do_cache=true, do_plot=false, save_plot
         loc_new_rand_global3 = loc_rand_global()
         loc_new_rand_global4 = loc_rand_global()
 
-        loc_new_arr = filter((loc) -> begin
-                # Prevent loc from being outside the domain
-                if loc[1] < 0 || loc[1] > width || loc[2] < 0 || loc[2] > height
-                    @info "New location $loc is outside the domain, skipping"
-                    return false
-                end
+        loc_new_arr = filter(valid_point_filter_closure,
+            [loc_new, loc_new_25, loc_new_75, loc_new_rand1, loc_new_rand2, loc_new_rand3, loc_new_rand4, loc_new_rand_global1, loc_new_rand_global2, loc_new_rand_global3, loc_new_rand_global4])
 
-                # Prevent loc to be inside mask
-                if find_mask_val((Int(round(loc[1] / h)), Int(round(loc[2] / h))), h, mask) != 0
-                    @info "New location $loc is inside a wall, skipping"
-                    results[loc] = -1  # assign a very bad score to prevent future selection
-                    return false
-                end
-
-                return true
-            end, [loc_new, loc_new_25, loc_new_75, loc_new_rand1, loc_new_rand2, loc_new_rand3, loc_new_rand4, loc_new_rand_global1, loc_new_rand_global2, loc_new_rand_global3, loc_new_rand_global4])
-
-        # Score the new location
+        # Score the new locations
         new_results = Dict{Tuple{Float64,Float64},Float64}()
         distributed_scoring!(new_results, loc_new_arr;
             h=h,
@@ -482,8 +513,34 @@ function optimize_locations_along_wall(; do_cache=true, do_plot=false, save_plot
         @info "Re-cached results with new locations added to $cache_path"
     end
 
+    # Always plot best location at the end, even if do_plot is false, to visualize the final result
+    best_loc = argmax(results)
+    best_score = results[best_loc]
+    @time "build_FDM_wifi_plot for best location" begin
+        u_best = solve_for_u(best_loc, F, size(u_grid), h)
+        build_FDM_wifi_plot(u_best; score=best_score, do_save=true, output_dir=plot_output_dir)
+    end
 
-    @info results
+    # Build heatmap of scores
+    score_values = collect(values(results))
+    score_min = minimum(score_values)
+    score_max = maximum(score_values)
+    @info "Score range: min = $score_min, max = $score_max"
+    score_range = score_max - score_min
+    score_norm = Dict(loc => (score - score_min) / score_range for (loc, score) in results)
+    score_grid = zeros(Float64, round(Int, width / dx), round(Int, height / dx))
+    for (loc, norm_score) in score_norm
+        i = Int(round(loc[2] / dx))
+        j = Int(round(loc[1] / dx))
+        if 1 <= i <= size(score_grid, 1) && 1 <= j <= size(score_grid, 2)
+            score_grid[i, j] = norm_score
+        end
+    end
+    p = heatmap(score_grid'; clims=(0, 1), title="Normalized scores of locations")
+    set_axes_wifi_plot(p)
+    savefig_auto_folder(p, joinpath(plot_output_dir, "location_scores_heatmap.png"))
+
+    # @info results
     @info "Best location found: $(argmax(results)) with score $(maximum(values(results)))"
 
     return results

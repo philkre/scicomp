@@ -1,6 +1,6 @@
-ENV["JULIA_CONDAPKG_BACKEND"] = "Null"
 import Pkg
 Pkg.activate(@__DIR__)
+
 
 using ArgParse
 using PythonCall
