@@ -37,7 +37,6 @@ Parse command-line arguments for controlling assignment execution.
 - `-p`: Output directory for plots (default: "plots/ass_3/")
 - `--ass1`: Execute only Assignment 3.1
 - `--ass2`: Execute only Assignment 3.2
-- `--ass3`: Execute only Assignment 3.3
 
 # Returns
 - `Dict{String,Any}`: Dictionary with parsed argument values
@@ -73,10 +72,6 @@ function parse_commandline()::Dict{String,Any}
 
         "--ass2"
         help = "execute (only) Assignment 3.2"
-        action = :store_true
-
-        "--ass3"
-        help = "execute (only) Assignment 3.3"
         action = :store_true
 
 
