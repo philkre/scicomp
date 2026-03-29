@@ -1,7 +1,9 @@
+ENV["JULIA_CONDAPKG_BACKEND"] = "Null"
 import Pkg
 Pkg.activate(@__DIR__)
 
 using ArgParse
+using PythonCall
 using Distributed: @everywhere
 
 using Helpers.DistributedUtil: set_procs, maximize_workers
